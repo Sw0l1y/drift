@@ -1,15 +1,27 @@
 extends Node3D
 
-const VERSION := "0.6.0"
+const VERSION := "0.7.0"
 const CONE_POINTS := 75
 
-const MAP_SIZE := 800.0
-const GRID_N := 121               # terrain vertices per side
+const MAP_SIZE := 1400.0
+const GRID_N := 185               # terrain vertices per side
 const ROAD_WIDTH := 14.0
 const ROAD_CARVE := 28.0          # how far the roadbed blends into the hills
 const PLAZA := Vector2(0.0, 190.0)
 const PLAZA_R := 50.0
 const PLAZA_H := 3.0
+
+# Desert canyon (east of the mountains): the rim opens up past DESERT_X,
+# terrain becomes a sandy plateau, and the canyon pass cuts down to a
+# river running along the canyon floor.
+const DESERT_X := 330.0
+const PLATEAU_H := 26.0
+const CANYON_FLOOR := -12.0
+const CANYON_INNER := 26.0        # flat canyon floor half-width
+const CANYON_OUTER := 100.0       # distance over which walls rise to plateau
+const RIVER_OFFSET := 17.0        # river sits this far to one side of the road
+const RIVER_HALF := 6.0           # river half-width
+const RIVER_DEPTH := 1.4          # trench depth below the water surface
 
 # Untyped on purpose: cars are duck-typed against the Garage contract
 # (DriftCar is a CharacterBody3D, PrerunnerTruck is a RigidBody3D).
@@ -32,9 +44,15 @@ var _cone_spawns: Array[Vector3] = []
 var _cone_hit: Array[bool] = []
 
 var _noise := FastNoiseLite.new()
-var _road_samples: Array[Vector3] = []
+var _road_samples: Array[Vector3] = []      # the tōge loop (scenery anchors)
 var _road_tangents: Array[Vector3] = []
-var _road_grid: Dictionary = {}
+var _spur_samples: Array[Vector3] = []      # the canyon pass / desert route
+var _spur_tangents: Array[Vector3] = []
+var _carve_samples: Array[Vector3] = []     # loop + spur, for terrain carving
+var _road_grid: Dictionary = {}             # cell -> indices into _carve_samples
+var _spur_grid: Dictionary = {}             # cell -> indices into _spur_samples
+var _river_pts: Array[Vector3] = []         # river centerline (y = water surface)
+var _river_grid: Dictionary = {}            # cell -> indices into _river_pts
 var _petals: GPUParticles3D
 
 func _ready() -> void:
@@ -44,13 +62,16 @@ func _ready() -> void:
 
 	_build_environment()
 	_build_road_path()
+	_build_canyon_path()
 	_build_terrain()
 	_build_road_mesh()
+	_build_river()
 	_build_boundaries()
 	_build_pagoda_plaza()
 	_build_torii_gates()
 	_build_trees()
 	_build_mountains()
+	_build_desert_scenery()
 	_build_petals()
 	_spawn_cones()
 
@@ -194,17 +215,120 @@ func _build_road_path() -> void:
 	for i in count:
 		var t := _road_samples[(i + 1) % count] - _road_samples[(i - 1 + count) % count]
 		_road_tangents.append(t.normalized())
+	_register_carve(_road_samples)
 
-	# Spatial hash of samples for fast nearest-road lookups during carving.
+func _build_canyon_path() -> void:
+	# Open spur off the loop's east straight: a smooth canyon pass that
+	# descends through the mountains into a desert canyon, then sweeps
+	# along the river. All flowing curves — no tight corners.
+	var pts: Array[Vector3] = [
+		Vector3(245, 22, 40),     # junction on the loop
+		Vector3(335, 15, 78),     # climbing out east
+		Vector3(430, 7, 55),      # the pass — gap in the mountains
+		Vector3(515, -3, -5),     # dropping into the basin
+		Vector3(560, -9, -110),   # entering the canyon, sweeping south
+		Vector3(600, -11, -210),
+		Vector3(565, -12, -310),  # long right-hand sweeper
+		Vector3(470, -12, -370),
+		Vector3(360, -11, -395),  # canyon floor straight
+		Vector3(250, -10, -380),  # scenic turnaround end
+	]
+	var n := pts.size()
+	var curve := Curve3D.new()
+	for i in n:
+		var prev := pts[maxi(i - 1, 0)]
+		var nxt := pts[mini(i + 1, n - 1)]
+		var tangent := (nxt - prev) * 0.3
+		curve.add_point(pts[i], -tangent, tangent)
+
+	var length := curve.get_baked_length()
+	var count := int(length / 6.0)
 	for i in count:
-		var cell := Vector2i(floori(_road_samples[i].x / 32.0), floori(_road_samples[i].z / 32.0))
+		_spur_samples.append(curve.sample_baked(length * i / float(count - 1)))
+	for i in count:
+		var a := _spur_samples[maxi(i - 1, 0)]
+		var b := _spur_samples[mini(i + 1, count - 1)]
+		_spur_tangents.append((b - a).normalized())
+
+	# Spur gets its own grid (for canyon shaping) plus the shared carve grid.
+	for i in count:
+		var cell := Vector2i(floori(_spur_samples[i].x / 32.0), floori(_spur_samples[i].z / 32.0))
+		if not _spur_grid.has(cell):
+			_spur_grid[cell] = []
+		_spur_grid[cell].append(i)
+	_register_carve(_spur_samples)
+
+	# River centerline: offset from the spur, desert portion only. Water
+	# surface sits a touch below road level; the terrain carves a trench.
+	for i in count:
+		if _desert_weight(_spur_samples[i].x, _spur_samples[i].z) < 0.8:
+			continue
+		var side := _side_t(_spur_tangents, i)
+		var rp := _spur_samples[i] + side * RIVER_OFFSET
+		rp.y = _spur_samples[i].y - 0.6
+		_river_pts.append(rp)
+	for i in _river_pts.size():
+		var cell := Vector2i(floori(_river_pts[i].x / 32.0), floori(_river_pts[i].z / 32.0))
+		if not _river_grid.has(cell):
+			_river_grid[cell] = []
+		_river_grid[cell].append(i)
+
+func _register_carve(samples: Array[Vector3]) -> void:
+	var base := _carve_samples.size()
+	for s in samples:
+		_carve_samples.append(s)
+	for i in samples.size():
+		var idx := base + i
+		var cell := Vector2i(floori(samples[i].x / 32.0), floori(samples[i].z / 32.0))
 		if not _road_grid.has(cell):
 			_road_grid[cell] = []
-		_road_grid[cell].append(i)
+		_road_grid[cell].append(idx)
 
 func _side(i: int) -> Vector3:
 	var t := _road_tangents[i]
 	return Vector3(t.z, 0.0, -t.x).normalized()
+
+func _side_t(tangents: Array[Vector3], i: int) -> Vector3:
+	var t := tangents[i]
+	return Vector3(t.z, 0.0, -t.x).normalized()
+
+func _nearest_river(x: float, z: float) -> Vector2:
+	# (xz distance to river centerline, water-surface height there).
+	var c := Vector2i(floori(x / 32.0), floori(z / 32.0))
+	var bd := 1e18
+	var by := 0.0
+	for cx in range(c.x - 1, c.x + 2):
+		for cz in range(c.y - 1, c.y + 2):
+			var cell := Vector2i(cx, cz)
+			if not _river_grid.has(cell):
+				continue
+			for i: int in _river_grid[cell]:
+				var dx := _river_pts[i].x - x
+				var dz := _river_pts[i].z - z
+				var d := dx * dx + dz * dz
+				if d < bd:
+					bd = d
+					by = _river_pts[i].y
+	return Vector2(sqrt(bd), by)
+
+func _nearest_spur(x: float, z: float) -> Vector2:
+	# (xz distance to spur centerline, road height there) via the spur grid.
+	var c := Vector2i(floori(x / 32.0), floori(z / 32.0))
+	var bd := 1e18
+	var by := 0.0
+	for cx in range(c.x - 2, c.x + 3):
+		for cz in range(c.y - 2, c.y + 3):
+			var cell := Vector2i(cx, cz)
+			if not _spur_grid.has(cell):
+				continue
+			for i: int in _spur_grid[cell]:
+				var dx := _spur_samples[i].x - x
+				var dz := _spur_samples[i].z - z
+				var d := dx * dx + dz * dz
+				if d < bd:
+					bd = d
+					by = _spur_samples[i].y
+	return Vector2(sqrt(bd), by)
 
 func _nearest_sample(x: float, z: float) -> int:
 	var best := 0
@@ -229,25 +353,55 @@ func _nearest_road(x: float, z: float) -> Vector2:
 			if not _road_grid.has(cell):
 				continue
 			for i: int in _road_grid[cell]:
-				var dx := _road_samples[i].x - x
-				var dz := _road_samples[i].z - z
+				var dx := _carve_samples[i].x - x
+				var dz := _carve_samples[i].z - z
 				var d := dx * dx + dz * dz
 				if d < bd:
 					bd = d
-					by = _road_samples[i].y
+					by = _carve_samples[i].y
 	return Vector2(sqrt(bd), by)
 
+func _desert_weight(x: float, z: float) -> float:
+	# 0 in the green valley, 1 deep in the desert (blends across the gap).
+	return smoothstep(DESERT_X - 60.0, DESERT_X + 80.0, x)
+
 func _terrain_height(x: float, z: float) -> float:
-	var h := _noise.get_noise_2d(x, z) * 14.0 + 8.0
-	# Mountain rim toward the map edges.
-	var r := maxf(absf(x), absf(z)) / (MAP_SIZE / 2.0)
-	var edge := smoothstep(0.6, 1.05, r)
+	var dw := _desert_weight(x, z)
+
+	# Green-valley base + sandy-plateau base, blended by desert weight.
+	var valley := _noise.get_noise_2d(x, z) * 14.0 + 8.0
+	var dunes := _noise.get_noise_2d(x * 0.6 + 500.0, z * 0.6) * 7.0
+	var plateau := PLATEAU_H + dunes
+	var h := lerpf(valley, plateau, dw)
+
+	# Mountain rim — but the east side opens up so the pass leads to desert.
+	var rx := absf(x) / (MAP_SIZE / 2.0)
+	var rz := absf(z) / (MAP_SIZE / 2.0)
+	var rim := maxf(rz, rx if x < 0.0 else rx * (1.0 - dw))
+	var east_edge := smoothstep(0.86, 1.04, x / (MAP_SIZE / 2.0)) * dw
+	var edge := maxf(smoothstep(0.6, 1.05, rim), east_edge * 0.35)
 	h += edge * edge * 110.0 + edge * absf(_noise.get_noise_2d(x * 3.0 + 900.0, z * 3.0)) * 50.0
-	# Flat plaza pad.
+
+	# Desert canyon: cut a steep-walled channel down to the river/road.
+	if dw > 0.01:
+		var spur := _nearest_spur(x, z)
+		if spur.x < CANYON_OUTER:
+			var floor_h := spur.y - 1.0
+			var wall := lerpf(floor_h, h, smoothstep(CANYON_INNER, CANYON_OUTER, spur.x))
+			h = lerpf(h, wall, dw)
+		# River trench: a sunken channel the water sits in, with banks.
+		if not _river_pts.is_empty():
+			var river := _nearest_river(x, z)
+			if river.x < RIVER_HALF + 6.0:
+				var bed := river.y - RIVER_DEPTH
+				h = lerpf(bed, h, smoothstep(RIVER_HALF, RIVER_HALF + 6.0, river.x))
+
+	# Flat plaza pad (green side only).
 	var dp := Vector2(x, z).distance_to(PLAZA)
 	if dp < PLAZA_R + 25.0:
 		h = lerpf(PLAZA_H, h, smoothstep(PLAZA_R, PLAZA_R + 25.0, dp))
-	# Carve the roadbed into the hills.
+
+	# Carve the actual roadbed into whatever's underneath (loop + spur).
 	var road := _nearest_road(x, z)
 	if road.x < ROAD_CARVE:
 		h = lerpf(road.y - 0.2, h, smoothstep(ROAD_WIDTH / 2.0 + 2.0, ROAD_CARVE, road.x))
@@ -270,22 +424,34 @@ func _build_terrain() -> void:
 	var grass_b := Color(0.29, 0.43, 0.19)
 	var rock := Color(0.36, 0.33, 0.31)
 	var snow := Color(0.93, 0.94, 0.96)
+	var sand := Color(0.78, 0.62, 0.36)
+	var sand_b := Color(0.7, 0.53, 0.3)
+	var red_rock := Color(0.62, 0.32, 0.2)
+	var red_dark := Color(0.45, 0.22, 0.14)
 
 	var colors := []
 	colors.resize(n * n)
 	for zi in n:
 		for xi in n:
+			var wx := xi * cell - half
+			var wz := zi * cell - half
 			var h := heights[zi * n + xi]
 			var hx0 := heights[zi * n + maxi(xi - 1, 0)]
 			var hx1 := heights[zi * n + mini(xi + 1, n - 1)]
 			var hz0 := heights[maxi(zi - 1, 0) * n + xi]
 			var hz1 := heights[mini(zi + 1, n - 1) * n + xi]
 			var steep := Vector2((hx1 - hx0) / (2.0 * cell), (hz1 - hz0) / (2.0 * cell)).length()
-			var c := grass_a.lerp(grass_b, (_noise.get_noise_2d(xi * 31.0, zi * 31.0) + 1.0) * 0.5)
-			c = c.lerp(rock, clampf((steep - 0.45) * 2.5, 0.0, 1.0))
-			c = c.lerp(rock, smoothstep(50.0, 80.0, h))
-			c = c.lerp(snow, smoothstep(85.0, 110.0, h))
-			colors[zi * n + xi] = c
+			# Green-valley palette.
+			var green := grass_a.lerp(grass_b, (_noise.get_noise_2d(xi * 31.0, zi * 31.0) + 1.0) * 0.5)
+			green = green.lerp(rock, clampf((steep - 0.45) * 2.5, 0.0, 1.0))
+			green = green.lerp(rock, smoothstep(50.0, 80.0, h))
+			green = green.lerp(snow, smoothstep(85.0, 110.0, h))
+			# Desert palette: sand floor, banded red rock on the canyon walls.
+			var band := (sin(h * 0.35) + 1.0) * 0.5
+			var desert := sand.lerp(sand_b, (_noise.get_noise_2d(xi * 23.0 + 7.0, zi * 23.0) + 1.0) * 0.5)
+			var wall := red_rock.lerp(red_dark, band)
+			desert = desert.lerp(wall, clampf((steep - 0.4) * 2.2, 0.0, 1.0))
+			colors[zi * n + xi] = green.lerp(desert, _desert_weight(wx, wz))
 
 	for zi in n - 1:
 		for xi in n - 1:
@@ -321,18 +487,23 @@ func _build_terrain() -> void:
 	add_child(body)
 
 func _build_road_mesh() -> void:
-	var count := _road_samples.size()
+	_build_ribbon(_road_samples, _road_tangents, true)
+	_build_ribbon(_spur_samples, _spur_tangents, false)
+
+func _build_ribbon(samples: Array[Vector3], tangents: Array[Vector3], closed: bool) -> void:
+	var count := samples.size()
 	var half := ROAD_WIDTH / 2.0
+	var segs := count if closed else count - 1
 
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var faces := PackedVector3Array()
-	for i in count:
+	for i in segs:
 		var j := (i + 1) % count
-		var li := _road_samples[i] + _side(i) * half
-		var ri := _road_samples[i] - _side(i) * half
-		var lj := _road_samples[j] + _side(j) * half
-		var rj := _road_samples[j] - _side(j) * half
+		var li := samples[i] + _side_t(tangents, i) * half
+		var ri := samples[i] - _side_t(tangents, i) * half
+		var lj := samples[j] + _side_t(tangents, j) * half
+		var rj := samples[j] - _side_t(tangents, j) * half
 		for v in [li, lj, ri, ri, lj, rj]:
 			st.add_vertex(v)
 			faces.append(v)
@@ -355,23 +526,24 @@ func _build_road_mesh() -> void:
 	add_child(body)
 
 	# Painted lines: white edges, dashed yellow center.
-	_add_road_lines([half - 0.7, -(half - 0.7)], 0.35, false, Color(0.92, 0.92, 0.9))
-	_add_road_lines([0.0], 0.3, true, Color(0.95, 0.8, 0.25))
+	_add_road_lines(samples, tangents, closed, [half - 0.7, -(half - 0.7)], 0.35, false, Color(0.92, 0.92, 0.9))
+	_add_road_lines(samples, tangents, closed, [0.0], 0.3, true, Color(0.95, 0.8, 0.25))
 
-func _add_road_lines(offsets: Array, width: float, dashed: bool, color: Color) -> void:
-	var count := _road_samples.size()
+func _add_road_lines(samples: Array[Vector3], tangents: Array[Vector3], closed: bool, offsets: Array, width: float, dashed: bool, color: Color) -> void:
+	var count := samples.size()
+	var segs := count if closed else count - 1
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var lift := Vector3.UP * 0.06
 	for offset: float in offsets:
-		for i in count:
+		for i in segs:
 			if dashed and i % 4 >= 2:
 				continue
 			var j := (i + 1) % count
-			var li := _road_samples[i] + _side(i) * (offset + width / 2.0) + lift
-			var ri := _road_samples[i] + _side(i) * (offset - width / 2.0) + lift
-			var lj := _road_samples[j] + _side(j) * (offset + width / 2.0) + lift
-			var rj := _road_samples[j] + _side(j) * (offset - width / 2.0) + lift
+			var li := samples[i] + _side_t(tangents, i) * (offset + width / 2.0) + lift
+			var ri := samples[i] + _side_t(tangents, i) * (offset - width / 2.0) + lift
+			var lj := samples[j] + _side_t(tangents, j) * (offset + width / 2.0) + lift
+			var rj := samples[j] + _side_t(tangents, j) * (offset - width / 2.0) + lift
 			for v in [li, lj, ri, ri, lj, rj]:
 				st.add_vertex(v)
 	st.generate_normals()
@@ -382,6 +554,45 @@ func _add_road_lines(offsets: Array, width: float, dashed: bool, color: Color) -
 	mat.emission_enabled = true
 	mat.emission = color
 	mat.emission_energy_multiplier = 0.2
+	mesh_inst.material_override = mat
+	add_child(mesh_inst)
+
+func _build_river() -> void:
+	# Water ribbon sitting in the carved river trench (built from the same
+	# centerline the terrain trench was carved from, so it always fits).
+	if _river_pts.size() < 2:
+		return
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var verts: Array[Vector3] = []
+	for i in _river_pts.size():
+		var a := _river_pts[maxi(i - 1, 0)]
+		var b := _river_pts[mini(i + 1, _river_pts.size() - 1)]
+		var dir := (b - a)
+		dir.y = 0.0
+		dir = dir.normalized()
+		var side := Vector3(dir.z, 0.0, -dir.x)
+		verts.append(_river_pts[i] + side * RIVER_HALF)
+		verts.append(_river_pts[i] - side * RIVER_HALF)
+	for i in range(0, verts.size() - 2, 2):
+		var a := verts[i]
+		var b := verts[i + 1]
+		var c := verts[i + 2]
+		var d := verts[i + 3]
+		for v in [a, c, b, b, c, d]:
+			st.add_vertex(v)
+	st.generate_normals()
+	var mesh_inst := MeshInstance3D.new()
+	mesh_inst.mesh = st.commit()
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.18, 0.5, 0.62, 0.82)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mat.metallic = 0.5
+	mat.roughness = 0.1
+	mat.emission_enabled = true
+	mat.emission = Color(0.12, 0.4, 0.55)
+	mat.emission_energy_multiplier = 0.4
 	mesh_inst.material_override = mat
 	add_child(mesh_inst)
 
@@ -638,18 +849,123 @@ func _add_sakura(pos: Vector3) -> void:
 	add_child(tree)
 
 func _build_mountains() -> void:
-	# Fuji to the north plus a skyline ring beyond the playable map.
-	_add_mountain(Vector3(40, 0, -620), 300.0, 240.0, true)
-	_add_mountain(Vector3(520, 0, -260), 180.0, 150.0, false)
-	_add_mountain(Vector3(560, 0, 120), 200.0, 170.0, true)
-	_add_mountain(Vector3(340, 0, 540), 170.0, 130.0, false)
-	_add_mountain(Vector3(-300, 0, 560), 190.0, 160.0, false)
-	_add_mountain(Vector3(-560, 0, 220), 210.0, 180.0, true)
-	_add_mountain(Vector3(-520, 0, -330), 170.0, 140.0, false)
+	# Fuji to the north plus a skyline ring beyond the playable map. The
+	# east side is left open so the canyon pass leads out to the desert.
+	_add_mountain(Vector3(40, 0, -780), 320.0, 250.0, true)
+	_add_mountain(Vector3(-760, 0, 120), 220.0, 190.0, true)
+	_add_mountain(Vector3(-640, 0, -460), 190.0, 160.0, false)
+	_add_mountain(Vector3(-420, 0, 740), 200.0, 170.0, false)
+	_add_mountain(Vector3(360, 0, 760), 180.0, 140.0, false)
+	# Distant desert buttes far to the east, low on the horizon.
+	_add_mountain(Vector3(880, 0, -250), 150.0, 110.0, false, Color(0.58, 0.3, 0.19))
+	_add_mountain(Vector3(840, 0, -520), 130.0, 90.0, false, Color(0.52, 0.27, 0.18))
+	_add_mountain(Vector3(840, 0, 60), 140.0, 95.0, false, Color(0.6, 0.32, 0.2))
 
-func _add_mountain(pos: Vector3, base_radius: float, height: float, snow_cap: bool) -> void:
+func _build_desert_scenery() -> void:
+	# Red-rock mesas and saguaro cacti scattered through the desert, with
+	# a cluster of buttes flanking the canyon route.
+	var seed_rng := RandomNumberGenerator.new()
+	seed_rng.seed = 42
+	var mesa_spots := [
+		Vector2(470, 140), Vector2(620, -40), Vector2(700, -180),
+		Vector2(430, -250), Vector2(620, -430), Vector2(330, -300),
+		Vector2(540, 60),
+	]
+	for spot: Vector2 in mesa_spots:
+		var base_y := _terrain_height(spot.x, spot.y)
+		_add_mesa(Vector3(spot.x, base_y, spot.y), seed_rng.randf_range(16.0, 30.0), seed_rng.randf_range(18.0, 40.0))
+
+	# Saguaro cacti dotted along the desert floor.
+	for i in 40:
+		var x := seed_rng.randf_range(DESERT_X + 40.0, 660.0)
+		var z := seed_rng.randf_range(-440.0, 200.0)
+		var spur := _nearest_spur(x, z)
+		# Keep them off the road but in the canyon area or floor.
+		if spur.x < 20.0 or spur.x > 120.0:
+			continue
+		var y := _terrain_height(x, z)
+		_add_cactus(Vector3(x, y - 0.3, z), seed_rng)
+
+func _add_mesa(pos: Vector3, radius: float, height: float) -> void:
+	var body := StaticBody3D.new()
+	body.position = pos
+	var layers := 3
+	var r := radius
+	var y := 0.0
+	var rock_a := Color(0.6, 0.31, 0.19)
+	var rock_b := Color(0.5, 0.26, 0.17)
+	for l in layers:
+		var h := height / layers
+		var mesh := MeshInstance3D.new()
+		var cyl := CylinderMesh.new()
+		cyl.top_radius = r * 0.92
+		cyl.bottom_radius = r
+		cyl.height = h
+		cyl.radial_segments = 7
+		mesh.mesh = cyl
+		mesh.position = Vector3(0, y + h / 2.0, 0)
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = rock_a if l % 2 == 0 else rock_b
+		mat.roughness = 1.0
+		mesh.material_override = mat
+		body.add_child(mesh)
+		var col := CollisionShape3D.new()
+		var cshape := CylinderShape3D.new()
+		cshape.radius = r * 0.92
+		cshape.height = h
+		col.shape = cshape
+		col.position = Vector3(0, y + h / 2.0, 0)
+		body.add_child(col)
+		y += h
+		r *= 0.78
+	add_child(body)
+
+func _add_cactus(pos: Vector3, rng: RandomNumberGenerator) -> void:
+	var cactus := StaticBody3D.new()
+	cactus.position = pos
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.27, 0.42, 0.26)
+	mat.roughness = 0.9
+	var trunk_h := rng.randf_range(3.0, 5.5)
+	var trunk := MeshInstance3D.new()
+	var tm := CapsuleMesh.new()
+	tm.radius = 0.4
+	tm.height = trunk_h
+	trunk.mesh = tm
+	trunk.position = Vector3(0, trunk_h / 2.0, 0)
+	trunk.material_override = mat
+	cactus.add_child(trunk)
+	var col := CollisionShape3D.new()
+	var cs := CapsuleShape3D.new()
+	cs.radius = 0.4
+	cs.height = trunk_h
+	col.shape = cs
+	col.position = Vector3(0, trunk_h / 2.0, 0)
+	cactus.add_child(col)
+	# A couple of arms.
+	for s in [-1.0, 1.0]:
+		if rng.randf() < 0.4:
+			continue
+		var arm := MeshInstance3D.new()
+		var am := CapsuleMesh.new()
+		am.radius = 0.3
+		am.height = 1.8
+		arm.mesh = am
+		arm.material_override = mat
+		var ah := rng.randf_range(1.2, trunk_h - 1.0)
+		arm.position = Vector3(s * 0.7, ah, 0)
+		arm.rotation.z = -s * 0.9
+		cactus.add_child(arm)
+		var arm2 := MeshInstance3D.new()
+		arm2.mesh = am
+		arm2.material_override = mat
+		arm2.position = Vector3(s * 1.0, ah + 1.0, 0)
+		cactus.add_child(arm2)
+	add_child(cactus)
+
+func _add_mountain(pos: Vector3, base_radius: float, height: float, snow_cap: bool, tint := Color(0.45, 0.5, 0.62)) -> void:
 	var base_mat := StandardMaterial3D.new()
-	base_mat.albedo_color = Color(0.45, 0.5, 0.62)
+	base_mat.albedo_color = tint
 	base_mat.roughness = 1.0
 	var mountain := MeshInstance3D.new()
 	var mesh := CylinderMesh.new()

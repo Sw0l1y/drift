@@ -99,8 +99,11 @@ func _physics_process(delta: float) -> void:
 	var attack := 5.0 if absf(steer_input) > 0.05 else 9.0
 	_steer = move_toward(_steer, steer_input, attack * delta)
 
-	# Steering authority ramps up with speed so the car can't pivot in place.
+	# Steering authority ramps up with speed so the car can't pivot in place,
+	# then eases back off at high speed so keyboard control isn't twitchy —
+	# without a wheel's fine analog input, full lock at 150km/h is undrivable.
 	var steer_strength := clampf(absf(fwd_speed) / 9.0, 0.0, 1.0)
+	steer_strength *= lerpf(1.0, 0.5, clampf((absf(fwd_speed) - 20.0) / 26.0, 0.0, 1.0))
 	if is_drifting:
 		# Bonus authority to hold a slide, tapering off at big slip angles
 		# so the car can't wind itself into a flat spin.

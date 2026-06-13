@@ -1,6 +1,6 @@
 extends Control
 
-const VERSION := "0.6.0"
+const VERSION := "0.7.0"
 const SECRET := "nathan"
 
 var _car_name: Label
