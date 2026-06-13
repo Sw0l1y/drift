@@ -106,5 +106,7 @@ func _mk_button(text: String, cb: Callable) -> Button:
 	b.text = text
 	b.custom_minimum_size = Vector2(260, 50)
 	b.add_theme_font_size_override("font_size", 24)
-	b.pressed.connect(cb)
+	b.pressed.connect(func() -> void:
+		Sfx.oneshot(self, Sfx.click(), -6.0)
+		cb.call())
 	return b

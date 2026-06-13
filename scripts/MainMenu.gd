@@ -1,6 +1,6 @@
 extends Control
 
-const VERSION := "0.7.1"
+const VERSION := "0.8.0"
 const SECRET := "nathan"
 
 var _car_name: Label
@@ -126,6 +126,7 @@ func _unhandled_input(event: InputEvent) -> void:
 					_open_dev()
 
 func _open_dev() -> void:
+	Sfx.oneshot(self, Sfx.chime(), -4.0)
 	_dev = DevPanel.new()
 	_dev.closed.connect(func() -> void: _dev = null)
 	add_child(_dev)
@@ -134,6 +135,7 @@ func _cycle_car(dir: int) -> void:
 	var n := Garage.cars().size()
 	Garage.selected = (Garage.selected + dir + n) % n
 	_refresh_car()
+	Sfx.oneshot(self, Sfx.click(), -6.0)
 
 func _refresh_car() -> void:
 	var def := Garage.cars()[Garage.selected]

@@ -126,7 +126,9 @@ func _mk_button(text: String, cb: Callable) -> Button:
 	var b := Button.new()
 	b.text = text
 	b.add_theme_font_size_override("font_size", 16)
-	b.pressed.connect(cb)
+	b.pressed.connect(func() -> void:
+		Sfx.oneshot(self, Sfx.click(), -7.0)
+		cb.call())
 	return b
 
 func _refresh_profiles() -> void:

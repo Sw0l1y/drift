@@ -1,6 +1,6 @@
 extends Node3D
 
-const VERSION := "0.7.1"
+const VERSION := "0.8.0"
 const CONE_POINTS := 75
 
 const MAP_SIZE := 1400.0
@@ -56,6 +56,8 @@ var _spur_grid: Dictionary = {}             # cell -> indices into _spur_samples
 var _river_pts: Array[Vector3] = []         # river centerline (y = water surface)
 var _river_grid: Dictionary = {}            # cell -> indices into _river_pts
 var _petals: GPUParticles3D
+var _sfx_pool: Array[AudioStreamPlayer] = []
+var _sfx_idx := 0
 
 func _ready() -> void:
 	_noise.seed = 7
@@ -97,6 +99,23 @@ func _ready() -> void:
 	pause.live_car = car
 	add_child(pause)
 
+	# Audio: looping engine/skid tied to the car, plus a one-shot pool.
+	var car_audio := preload("res://scripts/CarAudio.gd").new()
+	car_audio.car = car
+	add_child(car_audio)
+	for i in 6:
+		var p := AudioStreamPlayer.new()
+		add_child(p)
+		_sfx_pool.append(p)
+
+func _play_sfx(stream: AudioStream, vol := 0.0, pitch := 1.0) -> void:
+	var p := _sfx_pool[_sfx_idx]
+	_sfx_idx = (_sfx_idx + 1) % _sfx_pool.size()
+	p.stream = stream
+	p.volume_db = vol
+	p.pitch_scale = pitch
+	p.play()
+
 func _physics_process(delta: float) -> void:
 	hud.set_speed(car.flat_speed * 3.6)
 	_petals.global_position = car.global_position + Vector3(0, 16, 0)
@@ -135,6 +154,7 @@ func _update_airtime(delta: float) -> void:
 				if air_time > 1.6:
 					label = "HUGE AIR +%d" % pts
 				hud.flash(label, Color(0.55, 0.8, 1.0))
+				_play_sfx(Sfx.whoosh(), -2.0, clampf(1.3 - air_time * 0.2, 0.7, 1.3))
 		hud.set_air(false, 0)
 		air_time = 0.0
 	_was_grounded = grounded
@@ -147,11 +167,13 @@ func _bank_drift() -> void:
 	if drift_points >= 50.0:
 		total_score += int(drift_points)
 		hud.flash("+%d BANKED" % int(drift_points), Color(0.4, 1.0, 0.6))
+		_play_sfx(Sfx.chime(), -5.0)
 	drift_points = 0.0
 	multiplier = 1.0
 	drift_chain_active = false
 
 func _on_car_crashed(_impact_speed: float) -> void:
+	_play_sfx(Sfx.thud(), 2.0, randf_range(0.8, 1.0))
 	if drift_chain_active and drift_points > 0.0:
 		hud.flash("DRIFT LOST", Color(1.0, 0.3, 0.3))
 	drift_points = 0.0
@@ -175,6 +197,7 @@ func _check_cones() -> void:
 			var fling: Vector3 = Vector3(cv.x, 0.0, cv.z) * 0.08 + away * 1.5 + Vector3(0, 3.0, 0)
 			_cones[i].apply_central_impulse(fling)
 			_cones[i].apply_torque_impulse(Vector3(randf() - 0.5, randf() - 0.5, randf() - 0.5) * 4.0)
+			_play_sfx(Sfx.thud(), -8.0, randf_range(1.4, 1.9))
 			if drift_chain_active:
 				drift_points += CONE_POINTS * multiplier
 			else:
