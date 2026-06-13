@@ -1,6 +1,6 @@
 extends Node3D
 
-const VERSION := "0.5.0"
+const VERSION := "0.5.1"
 const CONE_POINTS := 75
 
 const MAP_SIZE := 800.0

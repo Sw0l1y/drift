@@ -15,7 +15,7 @@ static func cars() -> Array[Dictionary]:
 		},
 		{
 			"name": "TANUKI",
-			"desc": "prerunner truck · long-travel suspension",
+			"desc": "prerunner truck · low, wide & zippy",
 			"script": preload("res://scripts/Truck.gd"),
 		},
 	]

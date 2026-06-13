@@ -9,18 +9,19 @@ extends RigidBody3D
 
 signal crashed(impact_speed: float)
 
-const TRUCK_MASS := 1400.0
-const ENGINE_FORCE := 24000.0
-const TOP_SPEED := 44.0
-const BRAKE_FORCE := 20000.0
-const REVERSE_FORCE := 11000.0
-const STEER_MAX := 0.55
-const SPRING_K := 26000.0        # N/m per wheel
-const SPRING_DAMP := 2400.0      # Ns/m per wheel
-const REST_LEN := 0.85           # suspension travel
-const WHEEL_RADIUS := 0.55
-const MU_LAT := 1.15
-const MU_LONG := 1.3
+const TRUCK_MASS := 1250.0       # lighter & more eager
+const ENGINE_FORCE := 30000.0
+const TOP_SPEED := 54.0
+const BRAKE_FORCE := 22000.0
+const REVERSE_FORCE := 12000.0
+const STEER_MAX := 0.6
+const TRACK := 1.28              # half-width of the wheelbase (wide stance)
+const SPRING_K := 30000.0        # N/m per wheel — long-travel coilover
+const SPRING_DAMP := 2600.0      # Ns/m per wheel
+const REST_LEN := 0.55           # lower ride height than before
+const WHEEL_RADIUS := 0.52
+const MU_LAT := 1.25
+const MU_LONG := 1.45
 const QUARTER_MASS := TRUCK_MASS / 4.0
 
 var flat_speed := 0.0
@@ -42,10 +43,10 @@ var _smoke_r: GPUParticles3D
 func _ready() -> void:
 	spawn_transform = global_transform
 	mass = TRUCK_MASS
-	gravity_scale = 1.8
+	gravity_scale = 1.9
 	center_of_mass_mode = RigidBody3D.CENTER_OF_MASS_MODE_CUSTOM
-	center_of_mass = Vector3(0, 0.5, 0.05)
-	angular_damp = 0.8
+	center_of_mass = Vector3(0, 0.2, 0.05)   # low CoM — wide+low stance resists roll
+	angular_damp = 0.9
 	linear_damp = 0.0
 	continuous_cd = true
 	can_sleep = false
@@ -56,10 +57,10 @@ func _ready() -> void:
 	physics_material_override = phys
 
 	for hp in [
-		{"pos": Vector3(-0.98, 0.1, -1.55), "steer": true},
-		{"pos": Vector3(0.98, 0.1, -1.55), "steer": true},
-		{"pos": Vector3(-0.98, 0.1, 1.55), "steer": false},
-		{"pos": Vector3(0.98, 0.1, 1.55), "steer": false},
+		{"pos": Vector3(-TRACK, 0.15, -1.62), "steer": true},
+		{"pos": Vector3(TRACK, 0.15, -1.62), "steer": true},
+		{"pos": Vector3(-TRACK, 0.15, 1.62), "steer": false},
+		{"pos": Vector3(TRACK, 0.15, 1.62), "steer": false},
 	]:
 		_wheels.append({
 			"pos": hp["pos"], "steer": hp["steer"],
@@ -233,63 +234,98 @@ func _update_wheel_visuals(delta: float) -> void:
 func _build_collision() -> void:
 	var col := CollisionShape3D.new()
 	var shape := BoxShape3D.new()
-	shape.size = Vector3(2.0, 1.2, 4.4)
+	shape.size = Vector3(2.2, 0.95, 4.5)
 	col.shape = shape
-	col.position = Vector3(0, 1.0, 0)
+	col.position = Vector3(0, 0.75, 0)
 	add_child(col)
 
 func _build_visuals() -> void:
+	# Gunmetal body, raw-aluminum flares/skid, charcoal trim — low & wide.
 	var body_mat := StandardMaterial3D.new()
-	body_mat.albedo_color = Color(0.92, 0.89, 0.82)
-	body_mat.roughness = 0.5
-	body_mat.metallic = 0.2
+	body_mat.albedo_color = Color(0.27, 0.29, 0.32)
+	body_mat.roughness = 0.45
+	body_mat.metallic = 0.45
+	var flare_mat := StandardMaterial3D.new()
+	flare_mat.albedo_color = Color(0.12, 0.12, 0.13)
+	flare_mat.roughness = 0.85
 	var dark_mat := StandardMaterial3D.new()
-	dark_mat.albedo_color = Color(0.09, 0.09, 0.1)
+	dark_mat.albedo_color = Color(0.07, 0.07, 0.08)
 	dark_mat.roughness = 0.8
-	var accent_mat := StandardMaterial3D.new()
-	accent_mat.albedo_color = Color(0.85, 0.2, 0.12)
-	accent_mat.roughness = 0.6
+	var skid_mat := StandardMaterial3D.new()
+	skid_mat.albedo_color = Color(0.62, 0.63, 0.66)
+	skid_mat.metallic = 0.8
+	skid_mat.roughness = 0.35
 	var glass_mat := StandardMaterial3D.new()
-	glass_mat.albedo_color = Color(0.1, 0.12, 0.18)
-	glass_mat.metallic = 0.8
+	glass_mat.albedo_color = Color(0.08, 0.1, 0.14)
+	glass_mat.metallic = 0.85
 	glass_mat.roughness = 0.1
 
-	_box(Vector3(1.9, 0.3, 4.3), Vector3(0, 0.55, 0), dark_mat)        # frame
-	_box(Vector3(2.05, 0.55, 4.4), Vector3(0, 0.95, 0), body_mat)      # tub
-	_box(Vector3(1.9, 0.28, 1.3), Vector3(0, 1.32, -1.45), body_mat)   # hood
-	_box(Vector3(1.6, 0.1, 1.0), Vector3(0, 1.48, -1.45), accent_mat)  # hood stripe
-	_box(Vector3(1.85, 0.72, 1.5), Vector3(0, 1.72, -0.25), body_mat)  # cab
-	_box(Vector3(1.7, 0.5, 1.3), Vector3(0, 1.78, -0.25), glass_mat)   # glass
-	_box(Vector3(1.9, 0.12, 1.7), Vector3(0, 1.28, 1.35), dark_mat)    # bed floor
-	_box(Vector3(0.12, 0.4, 1.7), Vector3(-0.92, 1.5, 1.35), body_mat) # bed rail L
-	_box(Vector3(0.12, 0.4, 1.7), Vector3(0.92, 1.5, 1.35), body_mat)  # bed rail R
-	_box(Vector3(1.6, 0.14, 0.22), Vector3(0, 2.22, -0.7), dark_mat)   # light bar
+	# Low, wide body — slammed down over the wheels (origin rests ~0.78,
+	# wheel centers ~0.52, so the body wraps the tire tops).
+	_box(Vector3(2.0, 0.2, 4.4), Vector3(0, 0.02, 0), dark_mat)         # frame skid
+	_box(Vector3(2.1, 0.46, 4.3), Vector3(0, 0.26, 0.05), body_mat)     # main tub (wide)
+	_box(Vector3(2.0, 0.24, 1.5), Vector3(0, 0.5, -1.35), body_mat)     # hood
+	_box(Vector3(1.95, 0.52, 1.6), Vector3(0, 0.74, -0.15), body_mat)   # cab
+	_box(Vector3(1.78, 0.4, 1.4), Vector3(0, 0.8, -0.15), glass_mat)    # greenhouse
+	_box(Vector3(2.0, 0.1, 1.7), Vector3(0, 0.52, 1.45), dark_mat)      # bed floor
+	_box(Vector3(0.1, 0.3, 1.7), Vector3(-1.0, 0.65, 1.45), body_mat)   # bed rail L
+	_box(Vector3(0.1, 0.3, 1.7), Vector3(1.0, 0.65, 1.45), body_mat)    # bed rail R
 
+	# Aggressive front: skid bumper + grille block.
+	_box(Vector3(2.0, 0.32, 0.3), Vector3(0, 0.22, -2.15), skid_mat)    # front bumper
+	_box(Vector3(1.7, 0.36, 0.16), Vector3(0, 0.48, -2.05), dark_mat)   # grille
+	_box(Vector3(2.0, 0.26, 0.25), Vector3(0, 0.18, 2.18), skid_mat)    # rear bumper
+
+	# Wide fiberglass fender flares bulging over each wheel.
+	for fx in [-1.0, 1.0]:
+		for fz in [-1.62, 1.62]:
+			_box(Vector3(0.6, 0.3, 1.4), Vector3(fx * 1.24, 0.42, fz), flare_mat)
+
+	# Headlights & taillights.
+	var head_mat := StandardMaterial3D.new()
+	head_mat.albedo_color = Color(1.0, 0.96, 0.85)
+	head_mat.emission_enabled = true
+	head_mat.emission = Color(1.0, 0.95, 0.8)
+	head_mat.emission_energy_multiplier = 2.0
+	var tail_mat := StandardMaterial3D.new()
+	tail_mat.albedo_color = Color(1.0, 0.15, 0.12)
+	tail_mat.emission_enabled = true
+	tail_mat.emission = Color(1.0, 0.1, 0.08)
+	tail_mat.emission_energy_multiplier = 2.2
+	for sx in [-1.0, 1.0]:
+		_box(Vector3(0.42, 0.22, 0.08), Vector3(sx * 0.72, 0.46, -2.12), head_mat)
+		_box(Vector3(0.4, 0.24, 0.08), Vector3(sx * 0.82, 0.64, 2.22), tail_mat)
+
+	# Roof light bar with a row of lamps (the prerunner signature).
+	_box(Vector3(1.9, 0.1, 0.2), Vector3(0, 1.08, -0.55), dark_mat)
 	var lamp_mat := StandardMaterial3D.new()
-	lamp_mat.albedo_color = Color(1.0, 0.8, 0.4)
+	lamp_mat.albedo_color = Color(1.0, 0.97, 0.85)
 	lamp_mat.emission_enabled = true
-	lamp_mat.emission = Color(1.0, 0.75, 0.35)
-	lamp_mat.emission_energy_multiplier = 2.2
-	for i in 4:
-		_box(Vector3(0.2, 0.16, 0.1), Vector3(-0.57 + i * 0.38, 2.24, -0.78), lamp_mat)
-
-	var spare := MeshInstance3D.new()
-	var spare_mesh := CylinderMesh.new()
-	spare_mesh.top_radius = 0.5
-	spare_mesh.bottom_radius = 0.5
-	spare_mesh.height = 0.35
-	spare.mesh = spare_mesh
-	spare.material_override = dark_mat
-	spare.position = Vector3(0, 1.5, 1.35)
-	add_child(spare)
+	lamp_mat.emission = Color(1.0, 0.95, 0.8)
+	lamp_mat.emission_energy_multiplier = 2.4
+	for i in 6:
+		var lamp := MeshInstance3D.new()
+		var lamp_mesh := CylinderMesh.new()
+		lamp_mesh.top_radius = 0.1
+		lamp_mesh.bottom_radius = 0.1
+		lamp_mesh.height = 0.1
+		lamp.mesh = lamp_mesh
+		lamp.material_override = lamp_mat
+		lamp.rotation.x = PI / 2.0
+		lamp.position = Vector3(-0.8 + i * 0.32, 1.14, -0.62)
+		add_child(lamp)
 
 	var tire_mat := StandardMaterial3D.new()
-	tire_mat.albedo_color = Color(0.07, 0.07, 0.08)
+	tire_mat.albedo_color = Color(0.06, 0.06, 0.07)
 	tire_mat.roughness = 0.95
 	var hub_mat := StandardMaterial3D.new()
-	hub_mat.albedo_color = Color(0.7, 0.68, 0.62)
-	hub_mat.metallic = 0.7
-	hub_mat.roughness = 0.4
+	hub_mat.albedo_color = Color(0.55, 0.56, 0.6)
+	hub_mat.metallic = 0.75
+	hub_mat.roughness = 0.35
+	var shock_mat := StandardMaterial3D.new()
+	shock_mat.albedo_color = Color(0.92, 0.45, 0.12)   # orange coilover spring
+	shock_mat.metallic = 0.4
+	shock_mat.roughness = 0.5
 
 	for w: Dictionary in _wheels:
 		var pivot := Node3D.new()
@@ -297,25 +333,39 @@ func _build_visuals() -> void:
 		add_child(pivot)
 		var spinner := Node3D.new()
 		pivot.add_child(spinner)
+		# Beefy offroad tire (wider) + spoked-look hub.
 		var tire := MeshInstance3D.new()
 		var tire_mesh := CylinderMesh.new()
 		tire_mesh.top_radius = WHEEL_RADIUS
 		tire_mesh.bottom_radius = WHEEL_RADIUS
-		tire_mesh.height = 0.45
+		tire_mesh.height = 0.52
 		tire.mesh = tire_mesh
 		tire.material_override = tire_mat
 		tire.rotation.z = PI / 2.0
 		spinner.add_child(tire)
 		var hub := MeshInstance3D.new()
 		var hub_mesh := CylinderMesh.new()
-		hub_mesh.top_radius = WHEEL_RADIUS * 0.45
-		hub_mesh.bottom_radius = WHEEL_RADIUS * 0.45
-		hub_mesh.height = 0.47
+		hub_mesh.top_radius = WHEEL_RADIUS * 0.5
+		hub_mesh.bottom_radius = WHEEL_RADIUS * 0.5
+		hub_mesh.height = 0.54
 		hub.mesh = hub_mesh
 		hub.material_override = hub_mat
 		hub.rotation.z = PI / 2.0
 		spinner.add_child(hub)
 		w["pivot"] = pivot
+		# Visible coilover shock from the body down toward the wheel.
+		var shock := MeshInstance3D.new()
+		var shock_mesh := CylinderMesh.new()
+		shock_mesh.top_radius = 0.09
+		shock_mesh.bottom_radius = 0.09
+		shock_mesh.height = 0.7
+		shock.mesh = shock_mesh
+		var sx: float = w["pos"].x
+		var sz: float = w["pos"].z
+		shock.position = Vector3(sx * 0.72, 0.1, sz * 0.85)
+		shock.rotation.z = sx * 0.22
+		shock.material_override = shock_mat
+		add_child(shock)
 		w["spinner"] = spinner
 
 func _box(size: Vector3, pos: Vector3, mat: StandardMaterial3D) -> void:
@@ -334,7 +384,7 @@ func _build_smoke() -> void:
 		p.lifetime = 1.1
 		p.local_coords = false
 		p.emitting = false
-		p.position = Vector3(0.95 * side, 0.1, 1.6)
+		p.position = Vector3(1.2 * side, 0.1, 1.6)
 
 		var mat := ParticleProcessMaterial.new()
 		mat.direction = Vector3(0, 1, 0)
