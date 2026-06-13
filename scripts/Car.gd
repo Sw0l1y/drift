@@ -3,16 +3,18 @@ extends CharacterBody3D
 
 signal crashed(impact_speed: float)
 
-const ENGINE_POWER := 42.0
 const REVERSE_POWER := 16.0
 const BRAKE_POWER := 55.0
-const MAX_SPEED := 46.0
-const STEER_RATE := 2.5
-const BASE_GRIP := 10.0
-const DRIFT_GRIP := 2.2
 const DRAG := 0.018
 const ROLL_FRICTION := 1.4
-const GRAVITY := 30.0
+
+# Tunable via the dev panel / Tuning store (loaded in _ready).
+var engine_power := 42.0
+var max_speed := 46.0
+var steer_rate := 2.5
+var base_grip := 10.0
+var drift_grip := 2.2
+var gravity := 30.0
 
 var spawn_transform: Transform3D
 var is_drifting := false
@@ -36,8 +38,17 @@ func _ready() -> void:
 	spawn_transform = global_transform
 	floor_snap_length = 2.5
 	floor_constant_speed = true
+	apply_tuning()
 	_build_visuals()
 	_build_collision()
+
+func apply_tuning() -> void:
+	engine_power = Tuning.get_val("coupe", "engine_power")
+	max_speed = Tuning.get_val("coupe", "max_speed")
+	steer_rate = Tuning.get_val("coupe", "steer_rate")
+	base_grip = Tuning.get_val("coupe", "base_grip")
+	drift_grip = Tuning.get_val("coupe", "drift_grip")
+	gravity = Tuning.get_val("coupe", "gravity")
 	_build_smoke()
 
 func _physics_process(delta: float) -> void:
@@ -96,7 +107,7 @@ func _physics_process(delta: float) -> void:
 		steer_strength *= 1.25 * clampf(1.0 - (drift_angle - 0.55) / 0.9, 0.4, 1.0)
 	var steer_dir := 1.0 if fwd_speed >= -0.5 else -1.0
 	global_transform.basis = global_transform.basis.rotated(
-		up, _steer * STEER_RATE * steer_strength * steer_dir * delta).orthonormalized()
+		up, _steer * steer_rate * steer_strength * steer_dir * delta).orthonormalized()
 
 	# Alignment assist: the nose pulls back toward the velocity direction,
 	# strongly when steering is released, so slides straighten out instead
@@ -109,14 +120,14 @@ func _physics_process(delta: float) -> void:
 	forward = -global_transform.basis.z
 
 	if throttle:
-		velocity += forward * ENGINE_POWER * delta
+		velocity += forward * engine_power * delta
 	if brake:
 		if fwd_speed > 1.0:
 			velocity -= forward * BRAKE_POWER * delta
 		else:
 			velocity -= forward * REVERSE_POWER * delta
 
-	velocity += Vector3.DOWN * GRAVITY * delta
+	velocity += Vector3.DOWN * gravity * delta
 	if is_on_floor():
 		# The ground supports the car: cancel velocity into the floor,
 		# then press lightly along the normal so snapping holds.
@@ -134,12 +145,12 @@ func _physics_process(delta: float) -> void:
 	if flat_speed > 4.0 and fwd_speed > 0.0:
 		drift_angle = forward.angle_to(plane_vel / flat_speed)
 
-	var grip := BASE_GRIP
+	var grip := base_grip
 	if handbrake:
-		grip = DRIFT_GRIP
+		grip = drift_grip
 	elif drift_angle > 0.18:
 		# Once sliding, grip eases off so drifts sustain instead of snapping straight.
-		grip = lerpf(BASE_GRIP, DRIFT_GRIP, clampf(drift_angle / 0.9, 0.0, 0.85))
+		grip = lerpf(base_grip, drift_grip, clampf(drift_angle / 0.9, 0.0, 0.85))
 	if not grounded:
 		grip = 0.0
 	velocity -= lateral * clampf(grip * delta, 0.0, 1.0)
@@ -151,8 +162,8 @@ func _physics_process(delta: float) -> void:
 	velocity -= plane_vel * clampf(DRAG * flat_speed * delta, 0.0, 1.0)
 
 	plane_vel = velocity - ground_n * velocity.dot(ground_n)
-	if plane_vel.length() > MAX_SPEED:
-		velocity -= plane_vel - plane_vel.limit_length(MAX_SPEED)
+	if plane_vel.length() > max_speed:
+		velocity -= plane_vel - plane_vel.limit_length(max_speed)
 
 	var pre_speed := plane_vel.length()
 	move_and_slide()

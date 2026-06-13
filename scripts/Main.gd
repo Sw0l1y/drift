@@ -1,6 +1,6 @@
 extends Node3D
 
-const VERSION := "0.5.1"
+const VERSION := "0.6.0"
 const CONE_POINTS := 75
 
 const MAP_SIZE := 800.0
@@ -22,6 +22,10 @@ var drift_points := 0.0
 var multiplier := 1.0
 var drift_grace := 0.0
 var drift_chain_active := false
+
+var air_time := 0.0
+var air_launch_speed := 0.0
+var _was_grounded := true
 
 var _cones: Array[RigidBody3D] = []
 var _cone_spawns: Array[Vector3] = []
@@ -66,13 +70,15 @@ func _ready() -> void:
 	hud = HUD.new()
 	add_child(hud)
 
-func _physics_process(delta: float) -> void:
-	if Input.is_physical_key_pressed(KEY_ESCAPE):
-		get_tree().change_scene_to_file("res://scenes/MainMenu.tscn")
-		return
+	var pause := PauseLayer.new()
+	pause.live_car = car
+	add_child(pause)
 
+func _physics_process(delta: float) -> void:
 	hud.set_speed(car.flat_speed * 3.6)
 	_petals.global_position = car.global_position + Vector3(0, 16, 0)
+
+	_update_airtime(delta)
 
 	if car.is_drifting:
 		drift_chain_active = true
@@ -87,6 +93,32 @@ func _physics_process(delta: float) -> void:
 	hud.set_drift(drift_chain_active, drift_points, multiplier)
 	hud.set_total(total_score)
 	_check_cones()
+
+func _update_airtime(delta: float) -> void:
+	var grounded: bool = car.is_on_floor()
+	if not grounded:
+		if air_time == 0.0:
+			air_launch_speed = car.flat_speed
+		air_time += delta
+		# Live readout once it's clearly a jump, not a bump.
+		if air_time > 0.35:
+			hud.set_air(true, _air_award())
+	else:
+		if not _was_grounded and air_time > 0.45:
+			var pts := _air_award()
+			if pts > 0:
+				total_score += pts
+				var label := "AIRTIME +%d" % pts
+				if air_time > 1.6:
+					label = "HUGE AIR +%d" % pts
+				hud.flash(label, Color(0.55, 0.8, 1.0))
+		hud.set_air(false, 0)
+		air_time = 0.0
+	_was_grounded = grounded
+
+func _air_award() -> int:
+	# Longer hangtime and faster launches are worth more.
+	return int(air_time * air_time * 140.0 + air_time * air_launch_speed * 6.0)
 
 func _bank_drift() -> void:
 	if drift_points >= 50.0:

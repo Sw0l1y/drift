@@ -4,7 +4,8 @@ extends Node
 # untouched (external edits there force a reload prompt in the editor):
 #   godot --headless res://scenes/TestDrive.tscn -- drift
 # Modes: straight (throttle only) · drift (throttle, then full-lock
-# handbrake drift at t=4-8s, release after).
+# handbrake drift at t=4-8s, release after) · air (throttle straight to
+# launch off terrain and log airtime scoring).
 
 var t := 0.0
 var mode := "drift"
@@ -14,7 +15,6 @@ func _ready() -> void:
 	var args := OS.get_cmdline_user_args()
 	if args.size() > 0:
 		mode = args[0]
-	# Second arg selects the car by Garage index (0=coupe, 1=truck).
 	if args.size() > 1:
 		Garage.selected = int(args[1])
 	main = (load("res://scenes/Main.tscn") as PackedScene).instantiate()
@@ -34,10 +34,8 @@ func _process(delta: float) -> void:
 		var car = main.car
 		if car != null:
 			var p: Vector3 = car.global_position
-			var xform: Transform3D = car.global_transform
-			var pitch := (-xform.basis.z).y
-			print("t=%.1f pos=(%.0f,%.1f,%.0f) speed=%.1f angle=%.2f pitch=%.2f floor=%s" % [
-				t, p.x, p.y, p.z, car.flat_speed, car.drift_angle, pitch, car.is_on_floor()])
+			print("t=%.1f pos=(%.0f,%.1f,%.0f) speed=%.1f air=%.2f score=%d floor=%s" % [
+				t, p.x, p.y, p.z, car.flat_speed, main.air_time, main.total_score, car.is_on_floor()])
 
 func _key(code: Key, pressed: bool) -> void:
 	var ev := InputEventKey.new()

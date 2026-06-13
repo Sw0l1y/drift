@@ -7,6 +7,7 @@ var drift_label: Label
 var combo_label: Label
 var flash_label: Label
 var hint_label: Label
+var air_label: Label
 
 var _flash_timer := 0.0
 
@@ -35,6 +36,12 @@ func _ready() -> void:
 	combo_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	combo_label.visible = false
 
+	air_label = _make_label(Vector2(0, 90), 34, Color(0.55, 0.8, 1.0))
+	air_label.anchor_left = 0.0
+	air_label.anchor_right = 1.0
+	air_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	air_label.visible = false
+
 	flash_label = _make_label(Vector2(0, 140), 38, Color(1, 1, 1))
 	flash_label.anchor_left = 0.0
 	flash_label.anchor_right = 1.0
@@ -44,7 +51,7 @@ func _ready() -> void:
 	hint_label = _make_label(Vector2(-450, 16), 16, Color(1, 1, 1, 0.55))
 	hint_label.anchor_left = 1.0
 	hint_label.anchor_right = 1.0
-	hint_label.text = "WASD drive · SPACE handbrake · R reset · ESC menu"
+	hint_label.text = "WASD drive · SPACE handbrake · R reset · ESC pause"
 
 func _process(delta: float) -> void:
 	if _flash_timer > 0.0:
@@ -58,6 +65,11 @@ func set_speed(kmh: float) -> void:
 
 func set_total(score: int) -> void:
 	score_label.text = "SCORE %d" % score
+
+func set_air(active: bool, points: int) -> void:
+	air_label.visible = active
+	if active:
+		air_label.text = "AIR  +%d" % points
 
 func set_drift(active: bool, points: float, multiplier: float) -> void:
 	drift_label.visible = active

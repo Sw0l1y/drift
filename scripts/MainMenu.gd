@@ -1,9 +1,12 @@
 extends Control
 
-const VERSION := "0.5.1"
+const VERSION := "0.6.0"
+const SECRET := "nathan"
 
 var _car_name: Label
 var _car_desc: Label
+var _dev: DevPanel = null
+var _typed := ""
 
 func _ready() -> void:
 	var bg := ColorRect.new()
@@ -108,8 +111,24 @@ func _ready() -> void:
 	play.grab_focus()
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and event.physical_keycode == KEY_ENTER:
-		_start_game()
+	if event is InputEventKey and event.pressed and not event.echo:
+		var key := event as InputEventKey
+		if key.physical_keycode == KEY_ENTER and _dev == null:
+			_start_game()
+			return
+		# Hidden dev panel: type "nathan".
+		if _dev == null and key.unicode != 0:
+			var ch := char(key.unicode).to_lower()
+			if ch.length() == 1 and ch >= "a" and ch <= "z":
+				_typed = (_typed + ch).right(SECRET.length())
+				if _typed == SECRET:
+					_typed = ""
+					_open_dev()
+
+func _open_dev() -> void:
+	_dev = DevPanel.new()
+	_dev.closed.connect(func() -> void: _dev = null)
+	add_child(_dev)
 
 func _cycle_car(dir: int) -> void:
 	var n := Garage.cars().size()

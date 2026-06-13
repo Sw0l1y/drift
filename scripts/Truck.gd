@@ -9,20 +9,22 @@ extends RigidBody3D
 
 signal crashed(impact_speed: float)
 
-const TRUCK_MASS := 1250.0       # lighter & more eager
-const ENGINE_FORCE := 30000.0
-const TOP_SPEED := 54.0
 const BRAKE_FORCE := 22000.0
 const REVERSE_FORCE := 12000.0
-const STEER_MAX := 0.6
 const TRACK := 1.28              # half-width of the wheelbase (wide stance)
-const SPRING_K := 30000.0        # N/m per wheel — long-travel coilover
-const SPRING_DAMP := 2600.0      # Ns/m per wheel
 const REST_LEN := 0.55           # lower ride height than before
 const WHEEL_RADIUS := 0.52
-const MU_LAT := 1.25
-const MU_LONG := 1.45
-const QUARTER_MASS := TRUCK_MASS / 4.0
+
+# Tunable via the dev panel / Tuning store (loaded in _ready).
+var truck_mass := 1250.0
+var engine_force := 30000.0
+var top_speed := 54.0
+var steer_max := 0.6
+var spring_k := 30000.0          # N/m per wheel — long-travel coilover
+var spring_damp := 2600.0        # Ns/m per wheel
+var mu_lat := 1.25
+var mu_long := 1.45
+var quarter_mass := 312.5
 
 var flat_speed := 0.0
 var drift_angle := 0.0
@@ -42,7 +44,8 @@ var _smoke_r: GPUParticles3D
 
 func _ready() -> void:
 	spawn_transform = global_transform
-	mass = TRUCK_MASS
+	apply_tuning()
+	mass = truck_mass
 	gravity_scale = 1.9
 	center_of_mass_mode = RigidBody3D.CENTER_OF_MASS_MODE_CUSTOM
 	center_of_mass = Vector3(0, 0.2, 0.05)   # low CoM — wide+low stance resists roll
@@ -72,6 +75,18 @@ func _ready() -> void:
 	_build_visuals()
 	_build_smoke()
 
+func apply_tuning() -> void:
+	truck_mass = Tuning.get_val("truck", "mass")
+	engine_force = Tuning.get_val("truck", "engine_force")
+	top_speed = Tuning.get_val("truck", "top_speed")
+	steer_max = Tuning.get_val("truck", "steer_max")
+	spring_k = Tuning.get_val("truck", "spring_k")
+	spring_damp = Tuning.get_val("truck", "spring_damp")
+	mu_lat = Tuning.get_val("truck", "mu_lat")
+	mu_long = Tuning.get_val("truck", "mu_long")
+	quarter_mass = truck_mass / 4.0
+	mass = truck_mass
+
 func _physics_process(delta: float) -> void:
 	if Input.is_physical_key_pressed(KEY_R) or global_position.y < -20.0:
 		respawn()
@@ -93,7 +108,7 @@ func _physics_process(delta: float) -> void:
 	flat_speed = vel_flat.length()
 
 	# Steering: smoothed input, max angle tightens with speed.
-	var steer_limit := lerpf(STEER_MAX, 0.16, clampf(flat_speed / 32.0, 0.0, 1.0))
+	var steer_limit := lerpf(steer_max, 0.16, clampf(flat_speed / 32.0, 0.0, 1.0))
 	var attack := 4.0 if absf(steer_input) > 0.05 else 7.0
 	_steer = move_toward(_steer, steer_input * steer_limit, attack * delta)
 
@@ -129,7 +144,7 @@ func _physics_process(delta: float) -> void:
 		var comp: float = clampf(REST_LEN + WHEEL_RADIUS - dist, 0.0, REST_LEN)
 		var comp_vel: float = (comp - w["prev_comp"]) / delta
 		w["prev_comp"] = comp
-		var load: float = clampf(SPRING_K * comp + SPRING_DAMP * comp_vel, 0.0, 45000.0)
+		var load: float = clampf(spring_k * comp + spring_damp * comp_vel, 0.0, 60000.0)
 		w["load"] = load
 		apply_force(up * load, hardpoint - global_position)
 
@@ -147,25 +162,25 @@ func _physics_process(delta: float) -> void:
 
 		# Lateral: try to cancel slip, limited by load (friction circle) —
 		# unloaded inside wheels grip less, so slides develop naturally.
-		var mu_l := MU_LAT
+		var mu_l := mu_lat
 		if handbrake and not w["steer"]:
 			mu_l *= 0.4
-		var f_lat := clampf(-v_lat * QUARTER_MASS / 0.18, -mu_l * load, mu_l * load)
+		var f_lat := clampf(-v_lat * quarter_mass / 0.18, -mu_l * load, mu_l * load)
 		# Applied slightly above the contact to soften rollover leverage.
 		apply_force(side * f_lat, contact + up * 0.8 - global_position)
 
 		# Longitudinal: AWD drive, brakes, handbrake-locked rears.
 		var f_long := -v_fwd * 35.0  # rolling resistance
 		if throttle and grounded_count > 0:
-			f_long += (ENGINE_FORCE / grounded_count) * maxf(0.0, 1.0 - flat_speed / TOP_SPEED)
+			f_long += (engine_force / grounded_count) * maxf(0.0, 1.0 - flat_speed / top_speed)
 		if brake:
 			if v_fwd > 1.0:
 				f_long -= BRAKE_FORCE / 4.0
 			else:
-				f_long -= (REVERSE_FORCE / grounded_count) * maxf(0.0, 1.0 - flat_speed / (TOP_SPEED * 0.4))
+				f_long -= (REVERSE_FORCE / grounded_count) * maxf(0.0, 1.0 - flat_speed / (top_speed * 0.4))
 		if handbrake and not w["steer"]:
-			f_long = clampf(-v_fwd * QUARTER_MASS / 0.15, -mu_l * load, mu_l * load)
-		f_long = clampf(f_long, -MU_LONG * load, MU_LONG * load)
+			f_long = clampf(-v_fwd * quarter_mass / 0.15, -mu_l * load, mu_l * load)
+		f_long = clampf(f_long, -mu_long * load, mu_long * load)
 		apply_force(wheel_fwd * f_long, contact - global_position)
 
 	# Aero drag.
