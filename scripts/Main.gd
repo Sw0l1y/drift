@@ -1,6 +1,6 @@
 extends Node3D
 
-const VERSION := "0.3.0"
+const VERSION := "0.4.0"
 const CONE_POINTS := 75
 
 const MAP_SIZE := 800.0
@@ -260,6 +260,7 @@ func _build_terrain() -> void:
 			var i11 := (zi + 1) * n + xi + 1
 			for idx: int in [i00, i10, i01, i01, i10, i11]:
 				var vx := (idx % n) * cell - half
+				@warning_ignore("integer_division")
 				var vz := (idx / n) * cell - half
 				st.set_color(colors[idx])
 				st.add_vertex(Vector3(vx, heights[idx], vz))

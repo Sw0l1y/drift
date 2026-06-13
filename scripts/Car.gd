@@ -26,9 +26,13 @@ var _smoke_l: GPUParticles3D
 var _smoke_r: GPUParticles3D
 var _steer_visual := 0.0
 var _steer := 0.0
+var _ground_n := Vector3.UP
+var _air_time := 0.0
 
 func _ready() -> void:
 	spawn_transform = global_transform
+	floor_snap_length = 2.5
+	floor_constant_speed = true
 	_build_visuals()
 	_build_collision()
 	_build_smoke()
@@ -47,9 +51,34 @@ func _physics_process(delta: float) -> void:
 	if Input.is_physical_key_pressed(KEY_D) or Input.is_physical_key_pressed(KEY_RIGHT):
 		steer_input -= 1.0
 
+	# Pitch/roll the chassis to follow the terrain so thrust runs along
+	# the slope instead of digging into it. Brief airtime (bumps, crests)
+	# keeps the last ground normal and full grip — "coyote time" — so the
+	# car doesn't flicker between grounded and airborne handling.
+	var near_ground := false
+	if is_on_floor():
+		_ground_n = get_floor_normal()
+		_air_time = 0.0
+	else:
+		_air_time += delta
+		# Skimming over heightmap facet ridges at speed counts as driving:
+		# probe a short ray down to keep terrain alignment and grip.
+		var space := get_world_3d().direct_space_state
+		var query := PhysicsRayQueryParameters3D.create(
+			global_position + Vector3.UP, global_position + Vector3.DOWN * 2.5)
+		query.exclude = [get_rid()]
+		var hit := space.intersect_ray(query)
+		if hit:
+			near_ground = true
+			_ground_n = hit.normal
+	var grounded := is_on_floor() or near_ground or _air_time < 0.25
+	var ground_n := _ground_n if (grounded or _air_time < 0.6) else Vector3.UP
+	_align_to_ground(ground_n, grounded, delta)
+
+	var up := global_transform.basis.y
 	var forward := -global_transform.basis.z
-	var flat_vel := Vector3(velocity.x, 0.0, velocity.z)
-	var fwd_speed := flat_vel.dot(forward)
+	var plane_vel := velocity - ground_n * velocity.dot(ground_n)
+	var fwd_speed := plane_vel.dot(forward)
 
 	# Keyboard steering is smoothed (~0.2s to full lock, faster release)
 	# so taps allow fine corrections instead of instant full lock.
@@ -63,32 +92,44 @@ func _physics_process(delta: float) -> void:
 		# so the car can't wind itself into a flat spin.
 		steer_strength *= 1.25 * clampf(1.0 - (drift_angle - 0.55) / 0.9, 0.4, 1.0)
 	var steer_dir := 1.0 if fwd_speed >= -0.5 else -1.0
-	rotate_y(_steer * STEER_RATE * steer_strength * steer_dir * delta)
+	global_transform.basis = global_transform.basis.rotated(
+		up, _steer * STEER_RATE * steer_strength * steer_dir * delta).orthonormalized()
 
 	# Alignment assist: the nose pulls back toward the velocity direction,
 	# strongly when steering is released, so slides straighten out instead
 	# of tightening into a spin.
-	if drift_angle > 0.2 and flat_vel.length() > 4.0:
+	if drift_angle > 0.2 and plane_vel.length() > 4.0:
 		var align_rate := 1.0 if absf(_steer) < 0.1 else 0.35
-		var cy := (-global_transform.basis.z).cross(flat_vel.normalized()).y
-		rotate_y(signf(cy) * minf(drift_angle, 1.0) * align_rate * delta)
+		var cy := (-global_transform.basis.z).cross(plane_vel.normalized()).dot(up)
+		global_transform.basis = global_transform.basis.rotated(
+			up, signf(cy) * minf(drift_angle, 1.0) * align_rate * delta).orthonormalized()
 	forward = -global_transform.basis.z
 
 	if throttle:
-		flat_vel += forward * ENGINE_POWER * delta
+		velocity += forward * ENGINE_POWER * delta
 	if brake:
 		if fwd_speed > 1.0:
-			flat_vel -= forward * BRAKE_POWER * delta
+			velocity -= forward * BRAKE_POWER * delta
 		else:
-			flat_vel -= forward * REVERSE_POWER * delta
+			velocity -= forward * REVERSE_POWER * delta
 
-	fwd_speed = flat_vel.dot(forward)
-	var lateral := flat_vel - forward * fwd_speed
-	flat_speed = flat_vel.length()
+	velocity += Vector3.DOWN * GRAVITY * delta
+	if is_on_floor():
+		# The ground supports the car: cancel velocity into the floor,
+		# then press lightly along the normal so snapping holds.
+		var into := velocity.dot(ground_n)
+		if into < 0.0:
+			velocity -= ground_n * into
+		velocity -= ground_n * 2.0 * delta
+
+	plane_vel = velocity - ground_n * velocity.dot(ground_n)
+	fwd_speed = plane_vel.dot(forward)
+	var lateral := plane_vel - forward * fwd_speed
+	flat_speed = plane_vel.length()
 
 	drift_angle = 0.0
 	if flat_speed > 4.0 and fwd_speed > 0.0:
-		drift_angle = forward.angle_to(flat_vel / flat_speed)
+		drift_angle = forward.angle_to(plane_vel / flat_speed)
 
 	var grip := BASE_GRIP
 	if handbrake:
@@ -96,36 +137,33 @@ func _physics_process(delta: float) -> void:
 	elif drift_angle > 0.18:
 		# Once sliding, grip eases off so drifts sustain instead of snapping straight.
 		grip = lerpf(BASE_GRIP, DRIFT_GRIP, clampf(drift_angle / 0.9, 0.0, 0.85))
-	flat_vel -= lateral * clampf(grip * delta, 0.0, 1.0)
+	if not grounded:
+		grip = 0.0
+	velocity -= lateral * clampf(grip * delta, 0.0, 1.0)
 
-	flat_vel = flat_vel.move_toward(Vector3.ZERO, ROLL_FRICTION * delta)
-	flat_vel -= flat_vel * clampf(DRAG * flat_speed * delta, 0.0, 1.0)
-	if handbrake:
-		flat_vel = flat_vel.move_toward(Vector3.ZERO, 4.0 * delta)
-	flat_vel = flat_vel.limit_length(MAX_SPEED)
+	if grounded:
+		velocity -= plane_vel.limit_length(ROLL_FRICTION * delta)
+		if handbrake:
+			velocity -= plane_vel.limit_length(4.0 * delta)
+	velocity -= plane_vel * clampf(DRAG * flat_speed * delta, 0.0, 1.0)
 
-	velocity.x = flat_vel.x
-	velocity.z = flat_vel.z
-	velocity.y -= GRAVITY * delta
+	plane_vel = velocity - ground_n * velocity.dot(ground_n)
+	if plane_vel.length() > MAX_SPEED:
+		velocity -= plane_vel - plane_vel.limit_length(MAX_SPEED)
 
-	var pre_speed := flat_vel.length()
+	var pre_speed := plane_vel.length()
 	move_and_slide()
 
 	for i in get_slide_collision_count():
 		var col := get_slide_collision(i)
-		var normal := col.get_normal()
-		if normal.y < 0.5:
-			var collider := col.get_collider()
-			if collider is RigidBody3D:
-				collider.apply_central_impulse(-normal * maxf(pre_speed, 4.0) * 0.9)
-				collider.apply_torque_impulse(Vector3(randf() - 0.5, randf() - 0.5, randf() - 0.5) * pre_speed * 0.4)
-			else:
-				var lost := pre_speed - Vector3(velocity.x, 0.0, velocity.z).length()
-				if lost > 8.0:
-					crashed.emit(lost)
+		if col.get_normal().y < 0.5:
+			var post := velocity - ground_n * velocity.dot(ground_n)
+			var lost := pre_speed - post.length()
+			if lost > 8.0:
+				crashed.emit(lost)
 
-	flat_speed = Vector3(velocity.x, 0.0, velocity.z).length()
-	is_drifting = drift_angle > 0.26 and flat_speed > 7.0 and is_on_floor()
+	flat_speed = (velocity - ground_n * velocity.dot(ground_n)).length()
+	is_drifting = drift_angle > 0.26 and flat_speed > 7.0 and grounded
 
 	_smoke_l.emitting = is_drifting
 	_smoke_r.emitting = is_drifting
@@ -138,6 +176,17 @@ func respawn() -> void:
 	drift_angle = 0.0
 	flat_speed = 0.0
 	_steer = 0.0
+
+func _align_to_ground(n: Vector3, grounded: bool, delta: float) -> void:
+	var rate := 12.0 if grounded else 2.5
+	var w := 1.0 - exp(-rate * delta)
+	var new_up := global_transform.basis.y.slerp(n, w).normalized()
+	var x_axis := new_up.cross(global_transform.basis.z)
+	if x_axis.length_squared() < 0.25:
+		return
+	x_axis = x_axis.normalized()
+	var z_axis := x_axis.cross(new_up).normalized()
+	global_transform.basis = Basis(x_axis, new_up, z_axis)
 
 func _update_visuals(steer_input: float, lateral: Vector3, delta: float) -> void:
 	_steer_visual = lerpf(_steer_visual, steer_input * 0.45, 1.0 - exp(-10.0 * delta))

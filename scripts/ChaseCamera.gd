@@ -9,7 +9,11 @@ var target: DriftCar
 func _physics_process(delta: float) -> void:
 	if target == null:
 		return
+	# Flatten the car's forward — the chassis pitches with terrain now,
+	# and the camera should stay level rather than dive on slopes.
 	var fwd := -target.global_transform.basis.z
+	fwd.y = 0.0
+	fwd = fwd.normalized() if fwd.length() > 0.01 else Vector3.FORWARD
 	var vel := Vector3(target.velocity.x, 0.0, target.velocity.z)
 	# Blend toward the velocity direction so the camera swings wide during drifts.
 	var look_dir := fwd

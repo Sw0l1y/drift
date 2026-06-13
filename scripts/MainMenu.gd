@@ -1,6 +1,6 @@
 extends Control
 
-const VERSION := "0.3.0"
+const VERSION := "0.4.0"
 
 func _ready() -> void:
 	var bg := ColorRect.new()
