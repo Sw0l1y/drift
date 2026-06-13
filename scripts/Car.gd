@@ -178,9 +178,23 @@ func respawn() -> void:
 	_steer = 0.0
 
 func _align_to_ground(n: Vector3, grounded: bool, delta: float) -> void:
-	var rate := 12.0 if grounded else 2.5
-	var w := 1.0 - exp(-rate * delta)
-	var new_up := global_transform.basis.y.slerp(n, w).normalized()
+	# Explicit axis-angle rotation instead of Vector3.slerp: slerp builds
+	# its own axis internally and float drift can leave it fractionally
+	# non-normalized, which Basis.set_axis_angle rejects with error spam.
+	if n.length_squared() < 0.5:
+		return
+	var target := n.normalized()
+	var cur_up := global_transform.basis.y.normalized()
+	var axis := cur_up.cross(target)
+	var axis_len := axis.length()
+	var angle := atan2(axis_len, cur_up.dot(target))
+	var new_up := target
+	if angle > 0.0001:
+		if axis_len < 0.0001:
+			return
+		var rate := 12.0 if grounded else 2.5
+		var w := 1.0 - exp(-rate * delta)
+		new_up = cur_up.rotated(axis / axis_len, angle * w).normalized()
 	var x_axis := new_up.cross(global_transform.basis.z)
 	if x_axis.length_squared() < 0.25:
 		return
