@@ -1,10 +1,10 @@
 extends Control
 
-const VERSION := "0.1.0"
+const VERSION := "0.2.0"
 
 func _ready() -> void:
 	var bg := ColorRect.new()
-	bg.color = Color(0.085, 0.04, 0.15)
+	bg.color = Color(0.09, 0.07, 0.13)
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(bg)
 
@@ -20,14 +20,14 @@ func _ready() -> void:
 	title.text = "DRIFT"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.add_theme_font_size_override("font_size", 110)
-	title.add_theme_color_override("font_color", Color(1.0, 0.42, 0.2))
+	title.add_theme_color_override("font_color", Color(0.92, 0.22, 0.18))
 	vbox.add_child(title)
 
 	var subtitle := Label.new()
-	subtitle.text = "burn rubber · bank points"
+	subtitle.text = "sakura circuit · burn rubber · bank points"
 	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	subtitle.add_theme_font_size_override("font_size", 24)
-	subtitle.add_theme_color_override("font_color", Color(0.4, 0.95, 0.9))
+	subtitle.add_theme_color_override("font_color", Color(0.98, 0.72, 0.78))
 	vbox.add_child(subtitle)
 
 	var spacer := Control.new()

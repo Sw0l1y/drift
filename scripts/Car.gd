@@ -25,6 +25,7 @@ var _wheel_fr: Node3D
 var _smoke_l: GPUParticles3D
 var _smoke_r: GPUParticles3D
 var _steer_visual := 0.0
+var _steer := 0.0
 
 func _ready() -> void:
 	spawn_transform = global_transform
@@ -50,13 +51,27 @@ func _physics_process(delta: float) -> void:
 	var flat_vel := Vector3(velocity.x, 0.0, velocity.z)
 	var fwd_speed := flat_vel.dot(forward)
 
-	# Steering authority ramps up with speed so the car can't pivot in place,
-	# and gets a bonus while drifting so slides stay controllable.
+	# Keyboard steering is smoothed (~0.2s to full lock, faster release)
+	# so taps allow fine corrections instead of instant full lock.
+	var attack := 5.0 if absf(steer_input) > 0.05 else 9.0
+	_steer = move_toward(_steer, steer_input, attack * delta)
+
+	# Steering authority ramps up with speed so the car can't pivot in place.
 	var steer_strength := clampf(absf(fwd_speed) / 9.0, 0.0, 1.0)
 	if is_drifting:
-		steer_strength *= 1.3
+		# Bonus authority to hold a slide, tapering off at big slip angles
+		# so the car can't wind itself into a flat spin.
+		steer_strength *= 1.25 * clampf(1.0 - (drift_angle - 0.55) / 0.9, 0.4, 1.0)
 	var steer_dir := 1.0 if fwd_speed >= -0.5 else -1.0
-	rotate_y(steer_input * STEER_RATE * steer_strength * steer_dir * delta)
+	rotate_y(_steer * STEER_RATE * steer_strength * steer_dir * delta)
+
+	# Alignment assist: the nose pulls back toward the velocity direction,
+	# strongly when steering is released, so slides straighten out instead
+	# of tightening into a spin.
+	if drift_angle > 0.2 and flat_vel.length() > 4.0:
+		var align_rate := 1.0 if absf(_steer) < 0.1 else 0.35
+		var cy := (-global_transform.basis.z).cross(flat_vel.normalized()).y
+		rotate_y(signf(cy) * minf(drift_angle, 1.0) * align_rate * delta)
 	forward = -global_transform.basis.z
 
 	if throttle:
@@ -114,7 +129,7 @@ func _physics_process(delta: float) -> void:
 
 	_smoke_l.emitting = is_drifting
 	_smoke_r.emitting = is_drifting
-	_update_visuals(steer_input, lateral, delta)
+	_update_visuals(_steer, lateral, delta)
 
 func respawn() -> void:
 	global_transform = spawn_transform
@@ -122,6 +137,7 @@ func respawn() -> void:
 	is_drifting = false
 	drift_angle = 0.0
 	flat_speed = 0.0
+	_steer = 0.0
 
 func _update_visuals(steer_input: float, lateral: Vector3, delta: float) -> void:
 	_steer_visual = lerpf(_steer_visual, steer_input * 0.45, 1.0 - exp(-10.0 * delta))

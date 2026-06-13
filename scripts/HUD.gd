@@ -19,7 +19,7 @@ func _ready() -> void:
 	speed_label.anchor_bottom = 1.0
 	speed_label.text = "0 km/h"
 
-	drift_label = _make_label(Vector2(0, -190), 40, Color(0.4, 1.0, 0.9))
+	drift_label = _make_label(Vector2(0, -190), 40, Color(1.0, 0.62, 0.68))
 	drift_label.anchor_left = 0.0
 	drift_label.anchor_right = 1.0
 	drift_label.anchor_top = 1.0
