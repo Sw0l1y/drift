@@ -9,6 +9,7 @@ const SECRET := "nathan"
 var live_car = null   # passed in by Main so the dev panel can re-tune live
 
 var _menu: Control
+var _menu_box: VBoxContainer
 var _dev: DevPanel
 var _typed := ""
 
@@ -41,6 +42,7 @@ func _toggle_pause() -> void:
 	else:
 		_menu.visible = true
 		get_tree().paused = true
+		Ui.pop_in(_menu_box, 0.18)
 
 func _resume() -> void:
 	_menu.visible = false
@@ -78,6 +80,7 @@ func _build_menu() -> void:
 	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	vbox.add_theme_constant_override("separation", 14)
 	_menu.add_child(vbox)
+	_menu_box = vbox
 
 	var title := Label.new()
 	title.text = "PAUSED"
@@ -109,4 +112,5 @@ func _mk_button(text: String, cb: Callable) -> Button:
 	b.pressed.connect(func() -> void:
 		Sfx.oneshot(self, Sfx.click(), -6.0)
 		cb.call())
+	Ui.style_button(b)
 	return b

@@ -1,6 +1,6 @@
 extends Control
 
-const VERSION := "0.9.0"
+const VERSION := "0.9.1"
 const SECRET := "nathan"
 
 var _car_name: Label
@@ -45,6 +45,7 @@ func _ready() -> void:
 	play.custom_minimum_size = Vector2(260, 56)
 	play.add_theme_font_size_override("font_size", 28)
 	play.pressed.connect(_start_game)
+	Ui.style_button(play)
 	vbox.add_child(play)
 
 	# Car selector — cycles through the Garage registry.
@@ -58,6 +59,7 @@ func _ready() -> void:
 	prev.custom_minimum_size = Vector2(52, 64)
 	prev.add_theme_font_size_override("font_size", 24)
 	prev.pressed.connect(_cycle_car.bind(-1))
+	Ui.style_button(prev)
 	selector.add_child(prev)
 
 	var car_box := VBoxContainer.new()
@@ -82,6 +84,7 @@ func _ready() -> void:
 	next.custom_minimum_size = Vector2(52, 64)
 	next.add_theme_font_size_override("font_size", 24)
 	next.pressed.connect(_cycle_car.bind(1))
+	Ui.style_button(next)
 	selector.add_child(next)
 
 	_refresh_car()
@@ -91,6 +94,7 @@ func _ready() -> void:
 	quit.custom_minimum_size = Vector2(260, 44)
 	quit.add_theme_font_size_override("font_size", 20)
 	quit.pressed.connect(func() -> void: get_tree().quit())
+	Ui.style_button(quit)
 	vbox.add_child(quit)
 
 	var controls := Label.new()
@@ -108,6 +112,8 @@ func _ready() -> void:
 	version.add_theme_color_override("font_color", Color(1, 1, 1, 0.4))
 	add_child(version)
 
+	# Staggered entrance — each row eases in just after the one above it.
+	Ui.stagger_fade([title, subtitle, play, selector, quit, controls])
 	play.grab_focus()
 
 func _unhandled_input(event: InputEvent) -> void:

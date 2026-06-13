@@ -96,6 +96,7 @@ func _ready() -> void:
 
 	_refresh_profiles()
 	_refresh_values()
+	Ui.pop_in(panel, 0.2)
 
 func _build_section(root: VBoxContainer, heading: String, car: String) -> void:
 	var h := Label.new()
@@ -129,6 +130,7 @@ func _mk_button(text: String, cb: Callable) -> Button:
 	b.pressed.connect(func() -> void:
 		Sfx.oneshot(self, Sfx.click(), -7.0)
 		cb.call())
+	Ui.style_button(b)
 	return b
 
 func _refresh_profiles() -> void:
