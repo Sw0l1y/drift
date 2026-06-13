@@ -1,6 +1,6 @@
 extends Node3D
 
-const VERSION := "0.8.1"
+const VERSION := "0.9.0"
 const CONE_POINTS := 75
 
 const MAP_SIZE := 1400.0
@@ -119,6 +119,11 @@ func _play_sfx(stream: AudioStream, vol := 0.0, pitch := 1.0) -> void:
 func _physics_process(delta: float) -> void:
 	hud.set_speed(car.flat_speed * 3.6)
 	_petals.global_position = car.global_position + Vector3(0, 16, 0)
+
+	# Compass bearing: N = -Z, E = +X.
+	var xform: Transform3D = car.global_transform
+	var fwd := -xform.basis.z
+	hud.set_heading(rad_to_deg(atan2(fwd.x, -fwd.z)))
 
 	_update_airtime(delta)
 

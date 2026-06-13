@@ -8,6 +8,7 @@ var combo_label: Label
 var flash_label: Label
 var hint_label: Label
 var air_label: Label
+var compass: Compass
 
 var _flash_timer := 0.0
 
@@ -48,7 +49,16 @@ func _ready() -> void:
 	flash_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	flash_label.visible = false
 
-	hint_label = _make_label(Vector2(-450, 16), 16, Color(1, 1, 1, 0.55))
+	compass = Compass.new()
+	compass.anchor_left = 0.5
+	compass.anchor_right = 0.5
+	compass.offset_left = -220
+	compass.offset_right = 220
+	compass.offset_top = 12
+	compass.offset_bottom = 56
+	add_child(compass)
+
+	hint_label = _make_label(Vector2(-450, 64), 16, Color(1, 1, 1, 0.55))
 	hint_label.anchor_left = 1.0
 	hint_label.anchor_right = 1.0
 	hint_label.text = "WASD drive · SPACE handbrake · R reset · ESC pause"
@@ -65,6 +75,9 @@ func set_speed(kmh: float) -> void:
 
 func set_total(score: int) -> void:
 	score_label.text = "SCORE %d" % score
+
+func set_heading(deg: float) -> void:
+	compass.set_heading(deg)
 
 func set_air(active: bool, points: int) -> void:
 	air_label.visible = active
