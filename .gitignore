@@ -1,1 +1,4 @@
 .godot/
+# Editor tooling + local MCP config — kept local, not part of the game repo.
+addons/
+.mcp.json
