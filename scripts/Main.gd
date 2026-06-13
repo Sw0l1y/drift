@@ -1,6 +1,6 @@
 extends Node3D
 
-const VERSION := "0.9.3"
+const VERSION := "0.9.4"
 const CONE_POINTS := 75
 
 const MAP_SIZE := 1400.0
@@ -253,20 +253,26 @@ func _build_canyon_path() -> void:
 	# floor along the river, then climbs back out — no dead ends. The return
 	# leg stays east of the main loop so the two roads only meet at the
 	# junction (a clean intersection rather than overlapping lanes).
+	# Tangent to the tōge loop at the junction: the loop both enters and
+	# leaves heading south (the way the main road travels there), so you flow
+	# straight through and peel onto the desert route with almost no angle
+	# change — no momentum-killing fork. The body stays east of the main loop.
 	var pts: Array[Vector3] = [
-		Vector3(245, 22, 40),     # junction (shared with the tōge loop)
-		Vector3(360, 16, 75),     # out the pass, NE
-		Vector3(465, 7, 55),      # pass crest
-		Vector3(545, -3, -25),    # dropping into the basin
-		Vector3(590, -9, -135),   # enter the canyon, south sweep
-		Vector3(600, -12, -250),  # east canyon wall
-		Vector3(545, -12, -350),  # long bottom sweeper
-		Vector3(435, -12, -380),
-		Vector3(345, -9, -345),   # canyon floor, begin the return
-		Vector3(300, -5, -240),   # return leg climbing (east of main loop)
-		Vector3(310, 2, -130),
-		Vector3(335, 10, -35),
-		Vector3(330, 17, 35),     # final approach back to the junction
+		Vector3(245, 22, 40),     # junction — tangent point (heading S)
+		Vector3(262, 17, -35),    # leave heading S, slight E
+		Vector3(330, 6, -85),     # peel SE into the basin
+		Vector3(445, -3, -110),   # east
+		Vector3(550, -9, -165),   # canyon entry, south sweep
+		Vector3(600, -12, -260),  # east canyon wall
+		Vector3(555, -12, -355),  # long bottom sweeper
+		Vector3(440, -12, -385),
+		Vector3(345, -11, -350),  # canyon floor
+		Vector3(315, -6, -250),   # climb out, NW
+		Vector3(345, 1, -155),
+		Vector3(400, 8, -70),     # far east, now heading N
+		Vector3(390, 15, 35),
+		Vector3(320, 21, 95),     # come back N then W, above the junction
+		Vector3(250, 22, 75),     # approach junction from N, heading S
 	]
 	var n := pts.size()
 	var curve := Curve3D.new()
@@ -956,8 +962,15 @@ func _build_desert_scenery() -> void:
 		Vector2(540, 60),
 	]
 	for spot: Vector2 in mesa_spots:
+		var radius := seed_rng.randf_range(16.0, 30.0)
+		var height := seed_rng.randf_range(18.0, 40.0)
+		# Ground to the LOWEST terrain under the footprint (the analytic height
+		# at the centre floats above the coarse heightmap on dunes), then sink
+		# the base a few metres so there's never a gap, even on a slope.
 		var base_y := _terrain_height(spot.x, spot.y)
-		_add_mesa(Vector3(spot.x, base_y, spot.y), seed_rng.randf_range(16.0, 30.0), seed_rng.randf_range(18.0, 40.0))
+		for off: Vector2 in [Vector2(radius, 0), Vector2(-radius, 0), Vector2(0, radius), Vector2(0, -radius)]:
+			base_y = minf(base_y, _terrain_height(spot.x + off.x, spot.y + off.y))
+		_add_mesa(Vector3(spot.x, base_y - 4.0, spot.y), radius, height)
 
 	# Saguaro cacti dotted along the desert floor.
 	for i in 40:
@@ -968,7 +981,7 @@ func _build_desert_scenery() -> void:
 		if spur.x < 20.0 or spur.x > 120.0:
 			continue
 		var y := _terrain_height(x, z)
-		_add_cactus(Vector3(x, y - 0.3, z), seed_rng)
+		_add_cactus(Vector3(x, y - 0.6, z), seed_rng)
 
 func _add_mesa(pos: Vector3, radius: float, height: float) -> void:
 	var body := StaticBody3D.new()
