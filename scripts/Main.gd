@@ -1,6 +1,6 @@
 extends Node3D
 
-const VERSION := "0.9.2"
+const VERSION := "0.9.3"
 const CONE_POINTS := 75
 
 const MAP_SIZE := 1400.0
@@ -248,37 +248,40 @@ func _build_road_path() -> void:
 	_register_carve(_road_samples, true)
 
 func _build_canyon_path() -> void:
-	# Open spur off the loop's east straight: a smooth canyon pass that
-	# descends through the mountains into a desert canyon, then sweeps
-	# along the river. All flowing curves — no tight corners.
+	# Closed desert loop: branches off the tōge loop at the junction, sweeps
+	# out through the pass and down into the canyon, circuits the desert
+	# floor along the river, then climbs back out — no dead ends. The return
+	# leg stays east of the main loop so the two roads only meet at the
+	# junction (a clean intersection rather than overlapping lanes).
 	var pts: Array[Vector3] = [
-		Vector3(245, 22, 40),     # junction on the loop
-		Vector3(335, 15, 78),     # climbing out east
-		Vector3(430, 7, 55),      # the pass — gap in the mountains
-		Vector3(515, -3, -5),     # dropping into the basin
-		Vector3(560, -9, -110),   # entering the canyon, sweeping south
-		Vector3(600, -11, -210),
-		Vector3(565, -12, -310),  # long right-hand sweeper
-		Vector3(470, -12, -370),
-		Vector3(360, -11, -395),  # canyon floor straight
-		Vector3(250, -10, -380),  # scenic turnaround end
+		Vector3(245, 22, 40),     # junction (shared with the tōge loop)
+		Vector3(360, 16, 75),     # out the pass, NE
+		Vector3(465, 7, 55),      # pass crest
+		Vector3(545, -3, -25),    # dropping into the basin
+		Vector3(590, -9, -135),   # enter the canyon, south sweep
+		Vector3(600, -12, -250),  # east canyon wall
+		Vector3(545, -12, -350),  # long bottom sweeper
+		Vector3(435, -12, -380),
+		Vector3(345, -9, -345),   # canyon floor, begin the return
+		Vector3(300, -5, -240),   # return leg climbing (east of main loop)
+		Vector3(310, 2, -130),
+		Vector3(335, 10, -35),
+		Vector3(330, 17, 35),     # final approach back to the junction
 	]
 	var n := pts.size()
 	var curve := Curve3D.new()
-	for i in n:
-		var prev := pts[maxi(i - 1, 0)]
-		var nxt := pts[mini(i + 1, n - 1)]
-		var tangent := (nxt - prev) * 0.3
-		curve.add_point(pts[i], -tangent, tangent)
+	for i in n + 1:
+		var p := pts[i % n]
+		var tangent := (pts[(i + 1) % n] - pts[(i - 1 + n) % n]) * 0.25
+		curve.add_point(p, -tangent, tangent)
 
 	var length := curve.get_baked_length()
 	var count := int(length / 6.0)
 	for i in count:
-		_spur_samples.append(curve.sample_baked(length * i / float(count - 1)))
+		_spur_samples.append(curve.sample_baked(length * i / count))
 	for i in count:
-		var a := _spur_samples[maxi(i - 1, 0)]
-		var b := _spur_samples[mini(i + 1, count - 1)]
-		_spur_tangents.append((b - a).normalized())
+		var t := _spur_samples[(i + 1) % count] - _spur_samples[(i - 1 + count) % count]
+		_spur_tangents.append(t.normalized())
 
 	# Spur gets its own grid (for canyon shaping) plus the shared carve grid.
 	for i in count:
@@ -286,12 +289,12 @@ func _build_canyon_path() -> void:
 		if not _spur_grid.has(cell):
 			_spur_grid[cell] = []
 		_spur_grid[cell].append(i)
-	_register_carve(_spur_samples, false)
+	_register_carve(_spur_samples, true)
 
-	# River centerline: offset from the spur, desert portion only. Water
-	# surface sits a touch below road level; the terrain carves a trench.
+	# River centerline: only along the low canyon floor (not the pass or the
+	# climbing return leg). Water sits a touch below road level in a trench.
 	for i in count:
-		if _desert_weight(_spur_samples[i].x, _spur_samples[i].z) < 0.8:
+		if _spur_samples[i].y > -8.0 or _desert_weight(_spur_samples[i].x, _spur_samples[i].z) < 0.8:
 			continue
 		var side := _side_t(_spur_tangents, i)
 		var rp := _spur_samples[i] + side * RIVER_OFFSET
@@ -554,7 +557,7 @@ func _build_terrain() -> void:
 
 func _build_road_mesh() -> void:
 	_build_ribbon(_road_samples, _road_tangents, true)
-	_build_ribbon(_spur_samples, _spur_tangents, false)
+	_build_ribbon(_spur_samples, _spur_tangents, true)
 
 func _build_ribbon(samples: Array[Vector3], tangents: Array[Vector3], closed: bool) -> void:
 	var count := samples.size()
@@ -809,8 +812,9 @@ func _build_pagoda_plaza() -> void:
 	add_child(ring)
 
 func _build_torii_gates() -> void:
-	# Gates spanning the road at scenic spots (climb, summit, descent, home).
-	for target: Vector2 in [Vector2(245, 40), Vector2(60, -255), Vector2(-235, 20), Vector2(-175, 150)]:
+	# Gates spanning the tōge loop at scenic spots — kept clear of the desert
+	# junction (a gate there blocked the turn-off into the canyon route).
+	for target: Vector2 in [Vector2(60, -255), Vector2(-235, 20), Vector2(-175, 150)]:
 		var i := _nearest_sample(target.x, target.y)
 		var t := _road_tangents[i]
 		_add_torii(_road_samples[i], atan2(t.x, t.z))
