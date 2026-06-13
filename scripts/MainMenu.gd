@@ -1,6 +1,9 @@
 extends Control
 
-const VERSION := "0.4.2"
+const VERSION := "0.5.0"
+
+var _car_name: Label
+var _car_desc: Label
 
 func _ready() -> void:
 	var bg := ColorRect.new()
@@ -41,6 +44,45 @@ func _ready() -> void:
 	play.pressed.connect(_start_game)
 	vbox.add_child(play)
 
+	# Car selector — cycles through the Garage registry.
+	var selector := HBoxContainer.new()
+	selector.alignment = BoxContainer.ALIGNMENT_CENTER
+	selector.add_theme_constant_override("separation", 16)
+	vbox.add_child(selector)
+
+	var prev := Button.new()
+	prev.text = "<"
+	prev.custom_minimum_size = Vector2(52, 64)
+	prev.add_theme_font_size_override("font_size", 24)
+	prev.pressed.connect(_cycle_car.bind(-1))
+	selector.add_child(prev)
+
+	var car_box := VBoxContainer.new()
+	car_box.custom_minimum_size = Vector2(300, 0)
+	car_box.alignment = BoxContainer.ALIGNMENT_CENTER
+	selector.add_child(car_box)
+
+	_car_name = Label.new()
+	_car_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_car_name.add_theme_font_size_override("font_size", 30)
+	_car_name.add_theme_color_override("font_color", Color(1.0, 0.78, 0.35))
+	car_box.add_child(_car_name)
+
+	_car_desc = Label.new()
+	_car_desc.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_car_desc.add_theme_font_size_override("font_size", 14)
+	_car_desc.add_theme_color_override("font_color", Color(1, 1, 1, 0.55))
+	car_box.add_child(_car_desc)
+
+	var next := Button.new()
+	next.text = ">"
+	next.custom_minimum_size = Vector2(52, 64)
+	next.add_theme_font_size_override("font_size", 24)
+	next.pressed.connect(_cycle_car.bind(1))
+	selector.add_child(next)
+
+	_refresh_car()
+
 	var quit := Button.new()
 	quit.text = "QUIT"
 	quit.custom_minimum_size = Vector2(260, 44)
@@ -68,6 +110,16 @@ func _ready() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and event.physical_keycode == KEY_ENTER:
 		_start_game()
+
+func _cycle_car(dir: int) -> void:
+	var n := Garage.cars().size()
+	Garage.selected = (Garage.selected + dir + n) % n
+	_refresh_car()
+
+func _refresh_car() -> void:
+	var def := Garage.cars()[Garage.selected]
+	_car_name.text = def["name"]
+	_car_desc.text = def["desc"]
 
 func _start_game() -> void:
 	get_tree().change_scene_to_file("res://scenes/Main.tscn")

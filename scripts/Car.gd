@@ -18,6 +18,9 @@ var spawn_transform: Transform3D
 var is_drifting := false
 var drift_angle := 0.0
 var flat_speed := 0.0
+var cone_reach := 2.2
+var cam_distance := 8.0
+var cam_height := 3.4
 
 var _body_root: Node3D
 var _wheel_fl: Node3D
@@ -168,6 +171,9 @@ func _physics_process(delta: float) -> void:
 	_smoke_l.emitting = is_drifting
 	_smoke_r.emitting = is_drifting
 	_update_visuals(_steer, lateral, delta)
+
+func vel3() -> Vector3:
+	return velocity
 
 func respawn() -> void:
 	global_transform = spawn_transform

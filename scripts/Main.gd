@@ -1,6 +1,6 @@
 extends Node3D
 
-const VERSION := "0.4.2"
+const VERSION := "0.5.0"
 const CONE_POINTS := 75
 
 const MAP_SIZE := 800.0
@@ -11,7 +11,9 @@ const PLAZA := Vector2(0.0, 190.0)
 const PLAZA_R := 50.0
 const PLAZA_H := 3.0
 
-var car: DriftCar
+# Untyped on purpose: cars are duck-typed against the Garage contract
+# (DriftCar is a CharacterBody3D, PrerunnerTruck is a RigidBody3D).
+var car
 var cam: ChaseCamera
 var hud: HUD
 
@@ -50,8 +52,8 @@ func _ready() -> void:
 
 	var start := _road_samples[2]
 	var dir := _road_tangents[2]
-	car = DriftCar.new()
-	car.transform = Transform3D(Basis.looking_at(dir), start + Vector3.UP * 1.0)
+	car = Garage.create_selected()
+	car.transform = Transform3D(Basis.looking_at(dir), start + Vector3.UP * 1.5)
 	add_child(car)
 	car.crashed.connect(_on_car_crashed)
 
@@ -106,15 +108,16 @@ func _check_cones() -> void:
 	# passes through and we fling them with a scripted impulse instead.
 	if car.flat_speed < 3.0:
 		return
-	var car_pos := car.global_position
+	var car_pos: Vector3 = car.global_position
 	for i in _cones.size():
 		if _cone_hit[i]:
 			continue
 		var cp := _cones[i].global_position
-		if cp.distance_to(car_pos) < 2.2:
+		if cp.distance_to(car_pos) < float(car.cone_reach):
 			_cone_hit[i] = true
-			var away := (cp - car_pos).normalized()
-			var fling := Vector3(car.velocity.x, 0.0, car.velocity.z) * 0.08 + away * 1.5 + Vector3(0, 3.0, 0)
+			var away: Vector3 = (cp - car_pos).normalized()
+			var cv: Vector3 = car.vel3()
+			var fling: Vector3 = Vector3(cv.x, 0.0, cv.z) * 0.08 + away * 1.5 + Vector3(0, 3.0, 0)
 			_cones[i].apply_central_impulse(fling)
 			_cones[i].apply_torque_impulse(Vector3(randf() - 0.5, randf() - 0.5, randf() - 0.5) * 4.0)
 			if drift_chain_active:

@@ -14,6 +14,9 @@ func _ready() -> void:
 	var args := OS.get_cmdline_user_args()
 	if args.size() > 0:
 		mode = args[0]
+	# Second arg selects the car by Garage index (0=coupe, 1=truck).
+	if args.size() > 1:
+		Garage.selected = int(args[1])
 	main = (load("res://scenes/Main.tscn") as PackedScene).instantiate()
 	add_child(main)
 
@@ -28,10 +31,11 @@ func _process(delta: float) -> void:
 			_key(KEY_A, false)
 			_key(KEY_SPACE, false)
 	if Engine.get_process_frames() % 5 == 0:
-		var car: DriftCar = main.car
+		var car = main.car
 		if car != null:
-			var p := car.global_position
-			var pitch := (-car.global_transform.basis.z).y
+			var p: Vector3 = car.global_position
+			var xform: Transform3D = car.global_transform
+			var pitch := (-xform.basis.z).y
 			print("t=%.1f pos=(%.0f,%.1f,%.0f) speed=%.1f angle=%.2f pitch=%.2f floor=%s" % [
 				t, p.x, p.y, p.z, car.flat_speed, car.drift_angle, pitch, car.is_on_floor()])
 
