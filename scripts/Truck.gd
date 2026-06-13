@@ -68,6 +68,7 @@ func _ready() -> void:
 		_wheels.append({
 			"pos": hp["pos"], "steer": hp["steer"],
 			"prev_comp": 0.0, "grounded": false, "load": 0.0,
+			"dist": REST_LEN + WHEEL_RADIUS,
 			"pivot": null, "spinner": null,
 		})
 
@@ -141,6 +142,7 @@ func _physics_process(delta: float) -> void:
 
 		# --- suspension: spring + damper along chassis up ---
 		var dist: float = hardpoint.distance_to(hit["position"])
+		w["dist"] = dist   # actual ground distance, for the wheel visual
 		var comp: float = clampf(REST_LEN + WHEEL_RADIUS - dist, 0.0, REST_LEN)
 		var comp_vel: float = (comp - w["prev_comp"]) / delta
 		w["prev_comp"] = comp
@@ -239,7 +241,13 @@ func _update_wheel_visuals(delta: float) -> void:
 		var pivot: Node3D = w["pivot"]
 		var spinner: Node3D = w["spinner"]
 		var pos: Vector3 = w["pos"]
-		var droop: float = REST_LEN - w["prev_comp"] if w["grounded"] else REST_LEN
+		# Place the wheel from the actual ground-contact distance so the tyre
+		# bottom rests on the surface even when the chassis sinks on a hard
+		# landing (it tucks up into the body rather than clipping through).
+		# Small negative floor allows a touch of overcompression past rest.
+		var droop: float = REST_LEN
+		if w["grounded"]:
+			droop = clampf(w["dist"] - WHEEL_RADIUS, -0.2, REST_LEN)
 		pivot.position = Vector3(pos.x, pos.y - droop, pos.z)
 		if w["steer"]:
 			pivot.rotation.y = _steer
