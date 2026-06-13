@@ -1,6 +1,6 @@
 extends Node3D
 
-const VERSION := "0.7.0"
+const VERSION := "0.7.1"
 const CONE_POINTS := 75
 
 const MAP_SIZE := 1400.0
@@ -49,6 +49,8 @@ var _road_tangents: Array[Vector3] = []
 var _spur_samples: Array[Vector3] = []      # the canyon pass / desert route
 var _spur_tangents: Array[Vector3] = []
 var _carve_samples: Array[Vector3] = []     # loop + spur, for terrain carving
+var _carve_next: PackedInt32Array = []      # next sample on same road (-1 = end)
+var _carve_prev: PackedInt32Array = []      # prev sample on same road (-1 = end)
 var _road_grid: Dictionary = {}             # cell -> indices into _carve_samples
 var _spur_grid: Dictionary = {}             # cell -> indices into _spur_samples
 var _river_pts: Array[Vector3] = []         # river centerline (y = water surface)
@@ -215,7 +217,7 @@ func _build_road_path() -> void:
 	for i in count:
 		var t := _road_samples[(i + 1) % count] - _road_samples[(i - 1 + count) % count]
 		_road_tangents.append(t.normalized())
-	_register_carve(_road_samples)
+	_register_carve(_road_samples, true)
 
 func _build_canyon_path() -> void:
 	# Open spur off the loop's east straight: a smooth canyon pass that
@@ -256,7 +258,7 @@ func _build_canyon_path() -> void:
 		if not _spur_grid.has(cell):
 			_spur_grid[cell] = []
 		_spur_grid[cell].append(i)
-	_register_carve(_spur_samples)
+	_register_carve(_spur_samples, false)
 
 	# River centerline: offset from the spur, desert portion only. Water
 	# surface sits a touch below road level; the terrain carves a trench.
@@ -273,12 +275,19 @@ func _build_canyon_path() -> void:
 			_river_grid[cell] = []
 		_river_grid[cell].append(i)
 
-func _register_carve(samples: Array[Vector3]) -> void:
+func _register_carve(samples: Array[Vector3], closed: bool) -> void:
 	var base := _carve_samples.size()
+	var n := samples.size()
 	for s in samples:
 		_carve_samples.append(s)
-	for i in samples.size():
+	for i in n:
 		var idx := base + i
+		# Neighbour links so the carve can interpolate height along segments
+		# instead of snapping to the nearest sample (which steps on slopes).
+		var nxt := base + (i + 1) if i + 1 < n else (base if closed else -1)
+		var prv := base + (i - 1) if i - 1 >= 0 else (base + n - 1 if closed else -1)
+		_carve_next.append(nxt)
+		_carve_prev.append(prv)
 		var cell := Vector2i(floori(samples[i].x / 32.0), floori(samples[i].z / 32.0))
 		if not _road_grid.has(cell):
 			_road_grid[cell] = []
@@ -343,10 +352,12 @@ func _nearest_sample(x: float, z: float) -> int:
 	return best
 
 func _nearest_road(x: float, z: float) -> Vector2:
-	# Returns (xz distance to road, road height there), using the hash grid.
+	# Nearest sample via the hash grid, then project onto the two adjacent
+	# segments and interpolate height — so the carve follows the smooth road
+	# elevation instead of stepping between samples on slopes.
 	var c := Vector2i(floori(x / 32.0), floori(z / 32.0))
 	var bd := 1e18
-	var by := 0.0
+	var best := -1
 	for cx in range(c.x - 1, c.x + 2):
 		for cz in range(c.y - 1, c.y + 2):
 			var cell := Vector2i(cx, cz)
@@ -358,8 +369,31 @@ func _nearest_road(x: float, z: float) -> Vector2:
 				var d := dx * dx + dz * dz
 				if d < bd:
 					bd = d
-					by = _carve_samples[i].y
-	return Vector2(sqrt(bd), by)
+					best = i
+	if best < 0:
+		return Vector2(1e9, 0.0)
+	var res := Vector2(sqrt(bd), _carve_samples[best].y)
+	for nb: int in [_carve_next[best], _carve_prev[best]]:
+		if nb >= 0:
+			var seg := _project_segment(x, z, _carve_samples[best], _carve_samples[nb])
+			if seg.x < res.x:
+				res = seg
+	return res
+
+func _project_segment(x: float, z: float, a: Vector3, b: Vector3) -> Vector2:
+	# Closest point on segment a-b (in xz), returns (distance, interpolated y).
+	var abx := b.x - a.x
+	var abz := b.z - a.z
+	var denom := abx * abx + abz * abz
+	var t := 0.0
+	if denom > 0.0001:
+		t = clampf(((x - a.x) * abx + (z - a.z) * abz) / denom, 0.0, 1.0)
+	var cx := a.x + abx * t
+	var cz := a.z + abz * t
+	var cy := a.y + (b.y - a.y) * t
+	var dx := x - cx
+	var dz := z - cz
+	return Vector2(sqrt(dx * dx + dz * dz), cy)
 
 func _desert_weight(x: float, z: float) -> float:
 	# 0 in the green valley, 1 deep in the desert (blends across the gap).
@@ -402,9 +436,13 @@ func _terrain_height(x: float, z: float) -> float:
 		h = lerpf(PLAZA_H, h, smoothstep(PLAZA_R, PLAZA_R + 25.0, dp))
 
 	# Carve the actual roadbed into whatever's underneath (loop + spur).
+	# Flat band a touch below the road across the full width + a margin, so
+	# the surface always sits just above the terrain (no clip-through), then
+	# a graded shoulder blends out to the natural slope (no abrupt gap).
 	var road := _nearest_road(x, z)
 	if road.x < ROAD_CARVE:
-		h = lerpf(road.y - 0.2, h, smoothstep(ROAD_WIDTH / 2.0 + 2.0, ROAD_CARVE, road.x))
+		var bed := road.y - 0.25
+		h = lerpf(bed, h, smoothstep(ROAD_WIDTH / 2.0 + 2.5, ROAD_CARVE, road.x))
 	return h
 
 func _build_terrain() -> void:
@@ -498,15 +536,29 @@ func _build_ribbon(samples: Array[Vector3], tangents: Array[Vector3], closed: bo
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var faces := PackedVector3Array()
+	var skirt_out := 2.2
+	var skirt_down := Vector3.DOWN * 0.9
 	for i in segs:
 		var j := (i + 1) % count
-		var li := samples[i] + _side_t(tangents, i) * half
-		var ri := samples[i] - _side_t(tangents, i) * half
-		var lj := samples[j] + _side_t(tangents, j) * half
-		var rj := samples[j] - _side_t(tangents, j) * half
+		var si := _side_t(tangents, i)
+		var sj := _side_t(tangents, j)
+		var li := samples[i] + si * half
+		var ri := samples[i] - si * half
+		var lj := samples[j] + sj * half
+		var rj := samples[j] - sj * half
 		for v in [li, lj, ri, ri, lj, rj]:
 			st.add_vertex(v)
 			faces.append(v)
+		# Shoulder skirts drape from each road edge outward and down, hiding
+		# any lip/gap where the coarse terrain doesn't meet the road edge.
+		var lo_i := li + si * skirt_out + skirt_down
+		var lo_j := lj + sj * skirt_out + skirt_down
+		var ro_i := ri - si * skirt_out + skirt_down
+		var ro_j := rj - sj * skirt_out + skirt_down
+		for v in [li, lo_i, lj, lj, lo_i, lo_j]:
+			st.add_vertex(v)
+		for v in [ri, rj, ro_i, ro_i, rj, ro_j]:
+			st.add_vertex(v)
 	st.generate_normals()
 
 	var mesh_inst := MeshInstance3D.new()
