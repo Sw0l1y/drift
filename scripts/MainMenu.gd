@@ -1,6 +1,6 @@
 extends Control
 
-const VERSION := "0.2.0"
+const VERSION := "0.3.0"
 
 func _ready() -> void:
 	var bg := ColorRect.new()
@@ -24,7 +24,7 @@ func _ready() -> void:
 	vbox.add_child(title)
 
 	var subtitle := Label.new()
-	subtitle.text = "sakura circuit · burn rubber · bank points"
+	subtitle.text = "sakura tōge · burn rubber · bank points"
 	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	subtitle.add_theme_font_size_override("font_size", 24)
 	subtitle.add_theme_color_override("font_color", Color(0.98, 0.72, 0.78))

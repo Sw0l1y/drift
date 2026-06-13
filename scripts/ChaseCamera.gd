@@ -16,6 +16,13 @@ func _physics_process(delta: float) -> void:
 	if vel.length() > 4.0:
 		look_dir = fwd.lerp(vel.normalized(), 0.45).normalized()
 	var desired := target.global_position - look_dir * DISTANCE + Vector3.UP * HEIGHT
+	# Keep the camera above the terrain on crests and hillsides.
+	var space := get_world_3d().direct_space_state
+	var query := PhysicsRayQueryParameters3D.create(desired + Vector3.UP * 30.0, desired - Vector3.UP * 10.0)
+	query.exclude = [target.get_rid()]
+	var hit := space.intersect_ray(query)
+	if hit and desired.y < hit.position.y + 1.6:
+		desired.y = hit.position.y + 1.6
 	global_position = global_position.lerp(desired, 1.0 - exp(-6.0 * delta))
 	var focus := target.global_position + Vector3.UP * 1.0
 	if global_position.distance_to(focus) > 0.5:

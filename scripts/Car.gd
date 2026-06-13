@@ -34,7 +34,7 @@ func _ready() -> void:
 	_build_smoke()
 
 func _physics_process(delta: float) -> void:
-	if Input.is_physical_key_pressed(KEY_R):
+	if Input.is_physical_key_pressed(KEY_R) or global_position.y < -20.0:
 		respawn()
 		return
 
