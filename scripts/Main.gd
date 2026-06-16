@@ -1,6 +1,6 @@
 extends Node3D
 
-const VERSION := "0.9.5"
+const VERSION := "0.9.6"
 const CONE_POINTS := 75
 
 const MAP_SIZE := 1400.0
@@ -253,26 +253,27 @@ func _build_canyon_path() -> void:
 	# floor along the river, then climbs back out — no dead ends. The return
 	# leg stays east of the main loop so the two roads only meet at the
 	# junction (a clean intersection rather than overlapping lanes).
-	# Tangent to the tōge loop at the junction: the loop both enters and
-	# leaves heading south (the way the main road travels there), so you flow
-	# straight through and peel onto the desert route with almost no angle
-	# change — no momentum-killing fork. The body stays east of the main loop.
+	# Meets the tōge loop at ONE clean junction: the desert loop necks tightly
+	# to a single touch point (tangent — both head south there) and bulges
+	# east immediately, so the two roads diverge in a clean Y instead of
+	# running parallel and overlapping. Junction-adjacent points are pulled
+	# well east so there's no overlapping stretch; the body stays east of the
+	# main loop.
 	var pts: Array[Vector3] = [
-		Vector3(245, 22, 40),     # junction — tangent point (heading S)
-		Vector3(262, 17, -35),    # leave heading S, slight E
-		Vector3(330, 6, -85),     # peel SE into the basin
-		Vector3(445, -3, -110),   # east
-		Vector3(550, -9, -165),   # canyon entry, south sweep
-		Vector3(600, -12, -260),  # east canyon wall
-		Vector3(555, -12, -355),  # long bottom sweeper
-		Vector3(440, -12, -385),
-		Vector3(345, -11, -350),  # canyon floor
-		Vector3(315, -6, -250),   # climb out, NW
-		Vector3(345, 1, -155),
-		Vector3(400, 8, -70),     # far east, now heading N
-		Vector3(390, 15, 35),
-		Vector3(320, 21, 95),     # come back N then W, above the junction
-		Vector3(250, 22, 75),     # approach junction from N, heading S
+		Vector3(245, 22, 40),     # junction — touch point (heading S)
+		Vector3(300, 15, -10),    # bulge SE sharply away from the main road
+		Vector3(400, 4, -40),     # into the basin
+		Vector3(520, -6, -90),    # canyon entry
+		Vector3(590, -11, -190),  # canyon south sweep
+		Vector3(595, -12, -300),  # east wall corner
+		Vector3(530, -12, -370),  # long bottom sweeper
+		Vector3(420, -12, -380),
+		Vector3(330, -10, -340),  # canyon floor
+		Vector3(300, -4, -240),   # climb out (east of main loop)
+		Vector3(305, 3, -130),
+		Vector3(320, 12, -30),
+		Vector3(310, 20, 55),     # come back N, staying well east
+		Vector3(290, 22, 80),     # approach the touch point from NE
 	]
 	var n := pts.size()
 	var curve := Curve3D.new()
