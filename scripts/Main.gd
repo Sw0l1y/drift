@@ -1,6 +1,6 @@
 extends Node3D
 
-const VERSION := "0.9.6"
+const VERSION := "0.9.7"
 const CONE_POINTS := 75
 
 const MAP_SIZE := 1400.0
@@ -248,47 +248,42 @@ func _build_road_path() -> void:
 	_register_carve(_road_samples, true)
 
 func _build_canyon_path() -> void:
-	# Closed desert loop: branches off the tōge loop at the junction, sweeps
-	# out through the pass and down into the canyon, circuits the desert
-	# floor along the river, then climbs back out — no dead ends. The return
-	# leg stays east of the main loop so the two roads only meet at the
-	# junction (a clean intersection rather than overlapping lanes).
-	# Meets the tōge loop at ONE clean junction: the desert loop necks tightly
-	# to a single touch point (tangent — both head south there) and bulges
-	# east immediately, so the two roads diverge in a clean Y instead of
-	# running parallel and overlapping. Junction-adjacent points are pulled
-	# well east so there's no overlapping stretch; the body stays east of the
-	# main loop.
+	# Open desert ROUTE: forks off the tōge loop at TWO points (A north,
+	# B south on the east side), bulges east through the canyon, and merges
+	# back — each end a clean parallel Y-split, no overlap. Driving: ignore
+	# the forks for the plain tōge circuit, or take the fork at A → desert
+	# canyon → rejoin at B for the big combined circuit.
 	var pts: Array[Vector3] = [
-		Vector3(245, 22, 40),     # junction — touch point (heading S)
-		Vector3(300, 15, -10),    # bulge SE sharply away from the main road
-		Vector3(400, 4, -40),     # into the basin
-		Vector3(520, -6, -90),    # canyon entry
-		Vector3(590, -11, -190),  # canyon south sweep
-		Vector3(595, -12, -300),  # east wall corner
-		Vector3(530, -12, -370),  # long bottom sweeper
-		Vector3(420, -12, -380),
-		Vector3(330, -10, -340),  # canyon floor
-		Vector3(300, -4, -240),   # climb out (east of main loop)
-		Vector3(305, 3, -130),
-		Vector3(320, 12, -30),
-		Vector3(310, 20, 55),     # come back N, staying well east
-		Vector3(290, 22, 80),     # approach the touch point from NE
+		Vector3(245, 22, 40),     # A — north fork (a tōge point; heads S here)
+		Vector3(272, 16, -25),    # leave SSE — a parallel split off the tōge
+		Vector3(350, 5, -60),     # peel SE into the desert
+		Vector3(470, -4, -90),    # east into the basin
+		Vector3(570, -9, -165),   # canyon entry
+		Vector3(615, -12, -255),  # east canyon wall sweeper
+		Vector3(560, -12, -350),  # long bottom sweeper
+		Vector3(450, -12, -385),
+		Vector3(350, -11, -365),  # canyon floor
+		Vector3(290, -7, -315),   # climb back out, NW
+		Vector3(245, 2, -270),
+		Vector3(215, 20, -235),   # approach B from the ENE, heading WSW
+		Vector3(170, 44, -225),   # B — south fork (a tōge point; heads WSW here)
 	]
 	var n := pts.size()
 	var curve := Curve3D.new()
-	for i in n + 1:
-		var p := pts[i % n]
-		var tangent := (pts[(i + 1) % n] - pts[(i - 1 + n) % n]) * 0.25
-		curve.add_point(p, -tangent, tangent)
+	for i in n:
+		var prev := pts[maxi(i - 1, 0)]
+		var nxt := pts[mini(i + 1, n - 1)]
+		var tangent := (nxt - prev) * 0.3
+		curve.add_point(pts[i], -tangent, tangent)
 
 	var length := curve.get_baked_length()
 	var count := int(length / 6.0)
 	for i in count:
-		_spur_samples.append(curve.sample_baked(length * i / count))
+		_spur_samples.append(curve.sample_baked(length * i / float(count - 1)))
 	for i in count:
-		var t := _spur_samples[(i + 1) % count] - _spur_samples[(i - 1 + count) % count]
-		_spur_tangents.append(t.normalized())
+		var a := _spur_samples[maxi(i - 1, 0)]
+		var b := _spur_samples[mini(i + 1, count - 1)]
+		_spur_tangents.append((b - a).normalized())
 
 	# Spur gets its own grid (for canyon shaping) plus the shared carve grid.
 	for i in count:
@@ -296,7 +291,7 @@ func _build_canyon_path() -> void:
 		if not _spur_grid.has(cell):
 			_spur_grid[cell] = []
 		_spur_grid[cell].append(i)
-	_register_carve(_spur_samples, true)
+	_register_carve(_spur_samples, false)
 
 	# River centerline: only along the low canyon floor (not the pass or the
 	# climbing return leg). Water sits a touch below road level in a trench.
@@ -564,7 +559,7 @@ func _build_terrain() -> void:
 
 func _build_road_mesh() -> void:
 	_build_ribbon(_road_samples, _road_tangents, true)
-	_build_ribbon(_spur_samples, _spur_tangents, true)
+	_build_ribbon(_spur_samples, _spur_tangents, false)
 
 func _build_ribbon(samples: Array[Vector3], tangents: Array[Vector3], closed: bool) -> void:
 	var count := samples.size()
